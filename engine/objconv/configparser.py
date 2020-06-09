@@ -26,10 +26,10 @@ import string
 from xml.dom.minidom import *
 
 global varlines
-varlines = list()
+varlines = []
 
 global bindlines
-bindlines = list()
+bindlines = []
 
 global templine
 templine = tuple()
@@ -49,10 +49,7 @@ def add(filelist, dirname, filenames):
 
 def hasPreProcessor(line, filename):
     commands = ["ifdef", "if", "else", "endif"]
-    for command in commands:
-        if line.find("#"+command) >= 0:
-            return True
-    return False
+    return any(line.find("#"+command) >= 0 for command in commands)
 
 def parseLine(line, filename):
     global templine
@@ -204,7 +201,7 @@ def makeList(parsed):
     parsed[len(parsed)-1] = parsed[len(parsed)-1][:len(parsed[len(parsed)-1])-1]
     default = parsed.pop()
     var = parsed.pop()
-    section=list()
+    section = []
     for sec in parsed:#This will happen when one or more of the arguments to getVariable are variables themselves
         if sec == '' or var == '':
 #            print 'c'
@@ -223,7 +220,7 @@ def makeColorList(parsed):
 #        print 'a'
         return False
     parsed = parsed[1:]
-    newparsed = list()
+    newparsed = []
     print(newparsed)
     for item in parsed:
         if item == "":
@@ -315,46 +312,47 @@ def removeComments(parsable,comment):
             else:
                 break
 
-        elif (not opened) and (not linedout):
+        elif not (opened or linedout):
             if closed:
                 raise RuntimeError("Shit code, an extra closed symbol")
             break
 
-        elif not comment:
-            if linedout:
-                if opened:
-                    if lineloc < openloc:
-                        parsable = parsable[:lineloc]
-                        continue
-                elif closed:
-                    if lineloc < closeloc:
-                        parsable = parsable[:lineloc]
-                        continue
-                else:
+        else:
+            if opened:
+                if linedout and lineloc < openloc:
                     parsable = parsable[:lineloc]
                     continue
+            elif closed:
+                if lineloc < closeloc:
+                    parsable = parsable[:lineloc]
+                    continue
+            else:
+                parsable = parsable[:lineloc]
+                continue
             if opened:
                 if closed:
                     parsable = parsable[:openloc]+parsable[closeloc+2:]
-                    continue
                 else:
                     parsable = parsable[:openloc]
                     comment = True
-                    continue
+                continue
     return parsable, comment
 
 
 def printDuplicates():
     for i in range(len(varlines)-1):
         if len(varlines[i][0]) == len(varlines[i+1][0]):
-            duplicate = True
-            for j in range(len(varlines[i][0])):
-                if varlines[i][0][j] != varlines[i+1][0][j]:
-                    duplicate = False
-                    break
-            if varlines[i][1] == varlines[i+1][1] and duplicate:
-                if varlines[i][2] != varlines[i+1][2]:
-                    print("\nNon-Identical Duplicate:\n"+formatDuplicate(varlines[i],varlines[i+1])+"\n")
+            duplicate = all(
+                varlines[i][0][j] == varlines[i + 1][0][j]
+                for j in range(len(varlines[i][0]))
+            )
+
+            if (
+                varlines[i][1] == varlines[i + 1][1]
+                and duplicate
+                and varlines[i][2] != varlines[i + 1][2]
+            ):
+                print("\nNon-Identical Duplicate:\n"+formatDuplicate(varlines[i],varlines[i+1])+"\n")
 
 #----------------
 # XML creation functions
@@ -369,11 +367,13 @@ def createSection(currnode,section):
 def constructTraverse(currnode, sec):
     add = True
     for element in currnode.getElementsByTagName('section'):
-        if 'name' in element.attributes:
-            if element.attributes['name'].value == sec:
-                add = False
-                newchild = element
-                break
+        if (
+            'name' in element.attributes
+            and element.attributes['name'].value == sec
+        ):
+            add = False
+            newchild = element
+            break
     if add:
         global config
         newchild = config.createElement('section')
@@ -384,12 +384,14 @@ def constructTraverse(currnode, sec):
 def createVar(currnode, var, default):
     add = True
     for element in currnode.getElementsByTagName('var'):
-        if 'name' in element.attributes:
-            if element.attributes['name'].value == var:
-                if shouldOverwrite(element,default):
-                    element.attributes['name'].value = var
-                add = False
-                break
+        if (
+            'name' in element.attributes
+            and element.attributes['name'].value == var
+        ):
+            if shouldOverwrite(element,default):
+                element.attributes['name'].value = var
+            add = False
+            break
     if add:
         global config
         newchild = config.createElement('var')
@@ -399,14 +401,14 @@ def createVar(currnode, var, default):
 
 def createColor(currnode, name):#<color name="engine" r="1" g="1" b="1" a="1"/>	    <section name="absolute">
     print("color %s added"%name)
-    add = True
-    for element in currnode.getElementsByTagName('color'):
-        if 'name' in element.attributes:
-            if element.attributes['name'].value == name:
 #                if shouldOverwrite(element,default):
 #                    element.attributes['name'].value = var
-                add = False
-                break
+    add = not any(
+        'name' in element.attributes
+        and element.attributes['name'].value == name
+        for element in currnode.getElementsByTagName('color')
+    )
+
     if add:
         global config
         newchild = config.createElement('color')
@@ -420,11 +422,13 @@ def createColor(currnode, name):#<color name="engine" r="1" g="1" b="1" a="1"/>	
 def createBinding(currnode, binding):
     add = True
     for element in currnode.getElementsByTagName('bind'):
-        if 'command' in element.attributes:
-            if element.attributes['command'].value == binding:
-                print("Not adding keybinding %s.  Already present."%binding)
-                add = False
-                break
+        if (
+            'command' in element.attributes
+            and element.attributes['command'].value == binding
+        ):
+            print("Not adding keybinding %s.  Already present."%binding)
+            add = False
+            break
     if add:
         global config
         newchild = config.createElement('bind')
