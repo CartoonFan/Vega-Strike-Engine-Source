@@ -204,7 +204,7 @@ class XMeshHandler(xml.sax.handler.ContentHandler):
 		elif name == "polygons":
 			print("Reading faces...")
 			Blender.Window.DrawProgressBar(0.25, "Reading faces...")
-		elif name == "tri" or name == "quad" or name == "trifan":
+		elif name in ["tri", "quad", "trifan"]:
 			self.faceVerts	= []
 			self.facevUVs	= []
 		elif name == "vertex":
