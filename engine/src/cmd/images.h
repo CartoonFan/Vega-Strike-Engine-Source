@@ -8,6 +8,7 @@
 #include "../SharedPool.h"
 #include "gfx/sprite.h"
 #include "gfx/animation.h"
+#include "cargo.h"
 
 struct DockingPorts
 {
@@ -128,201 +129,36 @@ struct DockedUnits
         , whichdock( w ) {}
 };
 
-class Cargo
-{
-public:
-    StringPool::Reference content;
-    StringPool::Reference category;
-    StringPool::Reference description;
-    int   quantity;
-    float price;
-    float mass;
-    float volume;
-    bool  mission;
-    bool  installed;
-    float functionality;
-    float maxfunctionality;
-    Cargo()
-    {
-        mass     = 0;
-        volume   = 0;
-        price    = 0;
-        quantity = 1;
-        mission  = false;
-        installed = false;
-        functionality = maxfunctionality = 1.0f;
-    }
-    Cargo( std::string name, std::string cc, float pp, int qq, float mm, float vv, float func, float maxfunc ) :
-        content( name )
-        , category( cc )
-    {
-        quantity = qq;
-        price    = pp;
-        mass     = mm;
-        volume   = vv;
-        mission  = false;
-        installed = false;
-        functionality = func;
-        maxfunctionality = maxfunc;
-    }
-    Cargo( std::string name, std::string cc, float pp, int qq, float mm, float vv ) :
-        content( name )
-        , category( cc )
-    {
-        quantity = qq;
-        price    = pp;
-        mass     = mm;
-        volume   = vv;
-        mission  = false;
-        installed = false;
-    }
-    float GetFunctionality()
-    {
-        return functionality;
-    }
-    float GetMaxFunctionality()
-    {
-        return maxfunctionality;
-    }
-    void SetFunctionality( float func )
-    {
-        functionality = func;
-    }
-    void SetMaxFunctionality( float func )
-    {
-        maxfunctionality = func;
-    }
-    void SetMissionFlag( bool flag )
-    {
-        this->mission = flag;
-    }
-    void SetPrice( float price )
-    {
-        this->price = price;
-    }
-    void SetMass( float mass )
-    {
-        this->mass = mass;
-    }
-    void SetVolume( float vol )
-    {
-        this->volume = vol;
-    }
-    void SetQuantity( int quantity )
-    {
-        this->quantity = quantity;
-    }
-    void SetContent( const std::string &content )
-    {
-        this->content = content;
-    }
-    void SetCategory( const std::string &category )
-    {
-        this->category = category;
-    }
 
-    bool GetMissionFlag() const
-    {
-        return this->mission;
-    }
-    const std::string& GetCategory() const
-    {
-        return category;
-    }
-    const std::string& GetContent() const
-    {
-        return content;
-    }
-    const std::string& GetDescription() const
-    {
-        return description;
-    }
-    std::string GetCategoryPython()
-    {
-        return GetCategory();
-    }
-    std::string GetContentPython()
-    {
-        return GetContent();
-    }
-    std::string GetDescriptionPython()
-    {
-        return GetDescription();
-    }
-    int GetQuantity() const
-    {
-        return quantity;
-    }
-    float GetVolume() const
-    {
-        return volume;
-    }
-    float GetMass() const
-    {
-        return mass;
-    }
-    float GetPrice() const
-    {
-        return price;
-    }
-    bool operator==( const Cargo &other ) const
-    {
-        return content == other.content;
-    }
-    bool operator<( const Cargo &other ) const
-    {
-        return (category == other.category) ? (content < other.content) : (category < other.category);
-    }
-};
 
 class Box;
 class VSSprite;
 class Animation;
 
+// TODO: why is this a template??
 template < typename BOGUS >
 //added by chuck starchaser, to try to break dependency to VSSprite in vegaserver
 struct UnitImages
 {
-    UnitImages(){ VSCONSTRUCT1('i'); pHudImage=NULL; pExplosion=NULL;}
-/*    {
-*       VSCONSTRUCT1( 'i' )
-*  //        pHudImage = NULL;
-*       pExplosion = NULL;
-*   }*/
+    UnitImages();
+
     virtual ~UnitImages();
-/*    {
-*       delete pExplosion;
-*  //        delete pHudImage;
-*       VSDESTRUCT1
-*   }*/
+
     StringPool::Reference cockpitImage;
     StringPool::Reference explosion_type;
     Vector CockpitCenter;
-    VSSprite     *pHudImage;
+    VSSprite     *pHudImage = nullptr;
     ///The explosion starts at null, when activated time explode is incremented and ends at null
-    Animation    *pExplosion;
-    float timeexplode;
+    Animation    *pExplosion = nullptr;
+    float timeexplode = 0;
+
+    // TODO: use smart pointer
     float        *cockpit_damage;     //0 is radar, 1 to MAXVDU is vdus and >MAXVDU is gauges
-    ///how likely to fool missiles
-    /// -2 = inactive L2, -1 = inactive L1, 0 = not available, 1 = active L1, 2 = active L2, etc...
-    int  ecm;    
-    ///holds the info for the repair bot type. 0 is no bot;
-    unsigned char repair_droid;
-    float next_repair_time;
-    unsigned int  next_repair_cargo;    //(~0 : select randomly)
-    ///How much energy cloaking takes per frame
-    float cloakenergy;
-    ///how fast this starship decloaks/close...if negative, decloaking
-    int   cloakrate;   //short fix
-    ///If this unit cloaks like glass or like fading
-    bool  cloakglass;
-    ///if the unit is a wormhole
-    bool  forcejump;
-    float UpgradeVolume;
-    float CargoVolume;     ///mass just makes you turn worse
-    float equipment_volume;     //this one should be more general--might want to apply it to radioactive goods, passengers, ships (hangar), etc
-    float HiddenCargoVolume;
-    std::vector< Cargo > cargo;
+
+
+
+
+
     std::vector< string >destination;
     std::vector< DockingPorts >dockingports;
     ///warning unreliable pointer, never dereference!
@@ -330,15 +166,9 @@ struct UnitImages
     std::vector< DockedUnits* >dockedunits;
     UnitContainer DockedTo;
     float unitscale;     //for output
-    class XMLSerializer *unitwriter;
-    float fireControlFunctionality;
-    float fireControlFunctionalityMax;
-    float SPECDriveFunctionality;
-    float SPECDriveFunctionalityMax;
-    float CommFunctionality;
-    float CommFunctionalityMax;
-    float LifeSupportFunctionality;
-    float LifeSupportFunctionalityMax;
+    class XMLSerializer *unitwriter = nullptr;
+
+
     enum GAUGES
     {
         //Image-based gauges
@@ -362,16 +192,7 @@ struct UnitImages
     };
 };
 
-struct UnitSounds
-{
-    int engine;
-    int shield;
-    int armor;
-    int hull;
-    int explode;
-    int cloak;
-    int jump;
-};
+
 
 //From star_system_jump.cpp
 class StarSystem;

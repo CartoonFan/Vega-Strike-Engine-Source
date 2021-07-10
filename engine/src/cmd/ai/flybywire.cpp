@@ -1,3 +1,29 @@
+/**
+ * flybywire.cpp
+ *
+ * Copyright (C) Daniel Horn
+ * Copyright (C) 2020 pyramid3d, Stephen G. Tuggy, and other Vega Strike
+ * contributors
+ *
+ * https://github.com/vegastrike/Vega-Strike-Engine-Source
+ *
+ * This file is part of Vega Strike.
+ *
+ * Vega Strike is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * Vega Strike is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with Vega Strike.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+
 #include "flybywire.h"
 #include "vegastrike.h"
 #include <math.h>
@@ -7,6 +33,8 @@
 #include "gfx/cockpit_generic.h"
 #include "vs_globals.h"
 #include "config_xml.h"
+#include "universe.h"
+
 #define VELTHRESHOLD .1
 #define ANGVELTHRESHOLD .01
 
@@ -39,9 +67,9 @@ using Orders::MatchAngularVelocity;
 
 #define MATCHLINVELEXECUTE()                                                                         \
     do {                                                                                             \
-        parent->Thrust( (parent->GetMass()                                                           \
+        parent->Thrust( (parent->getMass()                                                           \
                          *(parent->ClampVelocity( desired,                                           \
-                                                  afterburn )+FrameOfRef-velocity)/SIMULATION_ATOM), \
+                                                  afterburn )+FrameOfRef-velocity)/simulation_atom_var), \
                        afterburn );                                                                  \
     }                                                                                                \
     while (0)
@@ -59,7 +87,7 @@ void MatchLinearVelocity::Execute()
     if ( !suborders.empty() ) {
         static int i = 0;
         if (i++ % 1000 == 0) {
-            std::cerr << "cannot execute suborders as Linear Velocity Matcher" << std::endl;                                // error printout just in case
+            BOOST_LOG_TRIVIAL(warning) << "cannot execute suborders as Linear Velocity Matcher";                                // error printout just in case
         }
     }
     MATCHLINVELSETUP();
@@ -74,8 +102,8 @@ void MatchLinearVelocity::Execute()
 MatchLinearVelocity::~MatchLinearVelocity()
 {
 #ifdef ORDERDEBUG
-    VSFileSystem::vs_fprintf( stderr, "mlv%x", this );
-    fflush( stderr );
+    BOOST_LOG_TRIVIAL(debug) << boost::format("mlv%1$x") % this;
+    VSFileSystem::flushLogs();
 #endif
 }
 
@@ -89,8 +117,8 @@ void Orders::MatchRoll::Execute()
         if (fabs( desired_roll-angvel.k ) < ANGVELTHRESHOLD)
             return;
     //prevent matchangvel from resetting this (kinda a hack)
-    parent->ApplyLocalTorque( parent->GetMoment()*Vector( 0, 0, desired_roll-angvel.k )/SIMULATION_ATOM );
-    parent->ApplyLocalTorque( parent->GetMoment()*Vector( 0, 0, desired_roll-angvel.k )/SIMULATION_ATOM );
+    parent->ApplyLocalTorque( parent->GetMoment()*Vector( 0, 0, desired_roll-angvel.k )/simulation_atom_var );
+    parent->ApplyLocalTorque( parent->GetMoment()*Vector( 0, 0, desired_roll-angvel.k )/simulation_atom_var );
 }
 
 void MatchAngularVelocity::Execute()
@@ -109,14 +137,14 @@ void MatchAngularVelocity::Execute()
             return;
     }
     parent->ApplyLocalTorque( parent->GetMoment()*( desired-parent->UpCoordinateLevel(
-                                                       parent->GetAngularVelocity() ) )/SIMULATION_ATOM );
+                                                       parent->GetAngularVelocity() ) )/simulation_atom_var );
 }
 
 MatchAngularVelocity::~MatchAngularVelocity()
 {
 #ifdef ORDERDEBUG
-    VSFileSystem::vs_fprintf( stderr, "mav%x", this );
-    fflush( stderr );
+    BOOST_LOG_TRIVIAL(debug) << boost::format("mav%1$x") % this;
+    VSFileSystem::flushLogs();
 #endif
 }
 
@@ -136,8 +164,8 @@ void MatchVelocity::Execute()
 MatchVelocity::~MatchVelocity()
 {
 #ifdef ORDERDEBUG
-    VSFileSystem::vs_fprintf( stderr, "mv%x", this );
-    fflush( stderr );
+    BOOST_LOG_TRIVIAL(debug) << boost::format("mv%1$x") % this;
+    VSFileSystem::flushLogs();
 #endif
 }
 
@@ -211,13 +239,13 @@ void FlyByWire::RollRight( float per )
 
 void FlyByWire::Afterburn( float per )
 {
-    Unit::Computer *cpu = &parent->GetComputerData();
+    Computer *cpu = &parent->GetComputerData();
 
     afterburn = (per > .1);
     if (!sheltonslide && !inertial_flight_model)
         desired_velocity = Vector( 0, 0, cpu->set_speed+per*(cpu->max_ab_speed()-cpu->set_speed) );
     else if (inertial_flight_model)
-        DirectThrust += Vector( 0, 0, parent->Limits().afterburn*per );
+        DirectThrust += Vector( 0, 0, parent->limits.afterburn*per );
     if ( parent == _Universe->AccessCockpit()->GetParent() ) {
         //printf("afterburn is %d\n",afterburn); // DELETEME WTF all this force feedback code and its unused.
         //COMMENTED BECAUSE OF SERVER -- NEED TO REINTEGRATE IT IN ANOTHER WAY
@@ -232,7 +260,7 @@ void FlyByWire::SheltonSlide( bool onoff )
 
 void FlyByWire::MatchSpeed( const Vector &vec )
 {
-    Unit::Computer *cpu = &parent->GetComputerData();
+    Computer *cpu = &parent->GetComputerData();
 
     cpu->set_speed = (vec).Magnitude();
     if ( cpu->set_speed > cpu->max_speed() )
@@ -241,9 +269,9 @@ void FlyByWire::MatchSpeed( const Vector &vec )
 
 void FlyByWire::Accel( float per )
 {
-    Unit::Computer *cpu = &parent->GetComputerData();
+    Computer *cpu = &parent->GetComputerData();
 
-    cpu->set_speed += per*cpu->max_speed()*SIMULATION_ATOM;
+    cpu->set_speed += per*cpu->max_speed()*simulation_atom_var; //SIMULATION_ATOM?
     if ( cpu->set_speed > cpu->max_speed() )
         cpu->set_speed = cpu->max_speed();
     static float reverse_speed_limit = XMLSupport::parse_float( vs_config->getVariable( "physics", "reverse_speed_limit", "1.0" ) );
@@ -273,20 +301,20 @@ void FlyByWire::ThrustFront( float percent )
 
 void FlyByWire::DirectThrustRight( float percent )
 {
-    DirectThrust.i = parent->Limits().lateral*percent;
+    DirectThrust.i = parent->limits.lateral*percent;
 }
 
 void FlyByWire::DirectThrustUp( float percent )
 {
-    DirectThrust.j = parent->Limits().vertical*percent;
+    DirectThrust.j = parent->limits.vertical*percent;
 }
 
 void FlyByWire::DirectThrustFront( float percent )
 {
     if (percent > 0)
-        DirectThrust.k = parent->Limits().forward*percent;
+        DirectThrust.k = parent->limits.forward*percent;
     else
-        DirectThrust.k = parent->Limits().retro*percent;
+        DirectThrust.k = parent->limits.retro*percent;
 }
 
 void FlyByWire::Execute()
@@ -296,8 +324,8 @@ void FlyByWire::Execute()
     if (!inertial_flight_model) {
         //Must translate the thrust values to velocities, which is somewhat cumbersome.
         Vector Limit(
-            parent->Limits().lateral, parent->Limits().vertical,
-            ( (DirectThrust.k > 0) ? parent->Limits().forward : parent->Limits().retro )
+            parent->limits.lateral, parent->limits.vertical,
+            ( (DirectThrust.k > 0) ? parent->limits.forward : parent->limits.retro )
                     );
         if (Limit.i <= 1) Limit.i = 1;
         if (Limit.j <= 1) Limit.j = 1;
@@ -351,8 +379,8 @@ void FlyByWire::Execute()
 FlyByWire::~FlyByWire()
 {
 #ifdef ORDERDEBUG
-    VSFileSystem::vs_fprintf( stderr, "fbw%x", this );
-    fflush( stderr );
+    BOOST_LOG_TRIVIAL(debug) << boost::format("fbw%1$x") % this;
+    VSFileSystem::flushLogs();
 #endif
 }
 

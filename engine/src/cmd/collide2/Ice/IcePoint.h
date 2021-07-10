@@ -4,6 +4,31 @@
  *	\file		IcePoint.h
  *	\author		Pierre Terdiman
  *	\date		April, 4, 2000
+ *
+ * Copyright (C) 2000 Pierre Terdiman
+ * Copyright (C) 2020 pyramid3d, LifWirser, Benjamen Meyer, Stephen G. Tuggy,
+ * and other Vega Strike contributors.
+ *
+ * This file is part of Vega Strike.
+ *
+ * Vega Strike is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * Vega Strike is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with Vega Strike.  If not, see <https://www.gnu.org/licenses/>.
+ */
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+/**
+ * Updated by Stephen G. Tuggy 2021-07-03
  */
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -24,7 +49,22 @@
 
 	class ICEMATHS_API Point
 	{
-		public:
+    protected:
+        inline_ const float&    Vals(enum PointComponent pointComponent) const
+        {
+            switch (pointComponent) {
+                case _X:
+                    return x;
+                case _Y:
+                    return y;
+                case _Z:
+                    return z;
+                default:
+                    return x;   // ?
+            }
+        }
+
+    public:
 
 		//! Empty constructor
 		inline_					Point()														{}
@@ -243,11 +283,11 @@
 								}
 
 		//! Slighty moves the point
-				void			Tweak(udword coord_mask, udword tweak_mask)
+				void			Tweak(uint32_t coord_mask, uint32_t tweak_mask)
 								{
-									if(coord_mask&1)	{ udword Dummy = IR(x);	Dummy^=tweak_mask;	x = FR(Dummy); }
-									if(coord_mask&2)	{ udword Dummy = IR(y);	Dummy^=tweak_mask;	y = FR(Dummy); }
-									if(coord_mask&4)	{ udword Dummy = IR(z);	Dummy^=tweak_mask;	z = FR(Dummy); }
+									if(coord_mask&1)	{ uint32_t Dummy = IR(x);	Dummy^=tweak_mask;	x = FR(Dummy); }
+									if(coord_mask&2)	{ uint32_t Dummy = IR(y);	Dummy^=tweak_mask;	y = FR(Dummy); }
+									if(coord_mask&4)	{ uint32_t Dummy = IR(z);	Dummy^=tweak_mask;	z = FR(Dummy); }
 								}
 
 		#define TWEAKMASK		0x3fffff
@@ -255,7 +295,7 @@
 		//! Slighty moves the point out
 		inline_	void			TweakBigger()
 								{
-									udword	Dummy = (IR(x)&TWEAKNOTMASK);	if(x >= 0.0f)	Dummy+=TWEAKMASK+1;	x = FR(Dummy);
+									uint32_t	Dummy = (IR(x)&TWEAKNOTMASK);	if(x >= 0.0f)	Dummy+=TWEAKMASK+1;	x = FR(Dummy);
 											Dummy = (IR(y)&TWEAKNOTMASK);	if(y >= 0.0f)	Dummy+=TWEAKMASK+1;	y = FR(Dummy);
 											Dummy = (IR(z)&TWEAKNOTMASK);	if(z >= 0.0f)	Dummy+=TWEAKMASK+1;	z = FR(Dummy);
 								}
@@ -263,7 +303,7 @@
 		//! Slighty moves the point in
 		inline_	void			TweakSmaller()
 								{
-									udword	Dummy = (IR(x)&TWEAKNOTMASK);	if(x < 0.0f)	Dummy+=TWEAKMASK+1;	x = FR(Dummy);
+									uint32_t	Dummy = (IR(x)&TWEAKNOTMASK);	if(x < 0.0f)	Dummy+=TWEAKMASK+1;	x = FR(Dummy);
 											Dummy = (IR(y)&TWEAKNOTMASK);	if(y < 0.0f)	Dummy+=TWEAKMASK+1;	y = FR(Dummy);
 											Dummy = (IR(z)&TWEAKNOTMASK);	if(z < 0.0f)	Dummy+=TWEAKMASK+1;	z = FR(Dummy);
 								}
@@ -335,7 +375,7 @@
 								}
 
 		//! Vector code ( bitmask = sign(z) | sign(y) | sign(x) )
-		inline_	udword			VectorCode()						const
+		inline_	uint32_t			VectorCode()						const
 								{
 									return (IR(x)>>31) | ((IR(y)&SIGN_BITMASK)>>30) | ((IR(z)&SIGN_BITMASK)>>29);
 								}
@@ -343,30 +383,39 @@
 		//! Returns largest axis
 		inline_	PointComponent	LargestAxis()						const
 								{
-									const float* Vals = &x;
 									PointComponent m = _X;
-									if(Vals[_Y] > Vals[m]) m = _Y;
-									if(Vals[_Z] > Vals[m]) m = _Z;
+									if (Vals(_Y) > Vals(m)) {
+                                        m = _Y;
+                                    }
+									if (Vals(_Z) > Vals(m)) {
+                                        m = _Z;
+                                    }
 									return m;
 								}
 
 		//! Returns closest axis
 		inline_	PointComponent	ClosestAxis()						const
 								{
-									const float* Vals = &x;
 									PointComponent m = _X;
-									if(AIR(Vals[_Y]) > AIR(Vals[m])) m = _Y;
-									if(AIR(Vals[_Z]) > AIR(Vals[m])) m = _Z;
+									if (AIR(Vals(_Y)) > AIR(Vals(m))) {
+                                        m = _Y;
+                                    }
+									if (AIR(Vals(_Z)) > AIR(Vals(m))) {
+                                        m = _Z;
+                                    }
 									return m;
 								}
 
 		//! Returns smallest axis
 		inline_	PointComponent	SmallestAxis()						const
 								{
-									const float* Vals = &x;
 									PointComponent m = _X;
-									if(Vals[_Y] < Vals[m]) m = _Y;
-									if(Vals[_Z] < Vals[m]) m = _Z;
+									if (Vals(_Y) < Vals(m)) {
+                                        m = _Y;
+                                    }
+									if (Vals(_Z) < Vals(m)) {
+                                        m = _Z;
+                                    }
 									return m;
 								}
 
@@ -383,10 +432,10 @@
 				Point&			Unfold(Plane& p, Point& a, Point& b);
 
 		//! Hash function from Ville Miettinen
-		inline_	udword			GetHashValue()						const
+		inline_	uint32_t			GetHashValue()						const
 								{
-									const udword* h = (const udword*)(this);
-									udword f = (h[0]+h[1]*11-(h[2]*17)) & 0x7fffffff;	// avoid problems with +-0
+									const uint32_t* h = (const uint32_t*)(this);
+									uint32_t f = (h[0]+h[1]*11-(h[2]*17)) & 0x7fffffff;	// avoid problems with +-0
 									return (f>>22)^(f>>12)^(f);
 								}
 

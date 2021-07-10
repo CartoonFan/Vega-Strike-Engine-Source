@@ -25,11 +25,13 @@
 #define CONTAINER_DEBUG
 #endif
 
+#include "gfx/vec.h"
+#include "unit_generic.h"
+
 #include <string>
 #include <vector>
 #include <map>
 #include <memory>
-#include "gfx/vec.h"
 
 class HaloSystem;
 struct GFXColor; // labeled as class, declared as struct in gfxlib_struct.h
@@ -53,10 +55,8 @@ class UnitCollection;
  * Units may have any number of weapons which, themselves may be units
  * the aistate indicates how the unit will behave in the upcoming phys frame
  */
-template < class UnitType >
-class GameUnit : public UnitType
+class GameUnit : public Unit
 {
-    friend class UnitFactory;
 protected:
 
 public:
@@ -73,8 +73,14 @@ public:
     GameUnit( const char *filename, bool SubUnit, int faction, std::string customizedUnit = std::string(
                   "" ), Flightgroup *flightgroup = NULL, int fg_subnumber = 0, std::string *netxml = NULL );
     virtual ~GameUnit();
+
+    enum _UnitType isUnit() const
+    {
+        return _UnitType::unit;
+    }
+
     unsigned int nummesh() const {
-        return UnitType::nummesh();
+        return Unit::nummesh();
     }
   ///fils in corner_min,corner_max and radial_size
   ///returns -1 if unit cannot dock, otherwise returns which dock it can dock at
@@ -155,9 +161,7 @@ public:
     void Thrust( const Vector &amt, bool afterburn = false );
 ///Resolves forces of given unit on a physics frame
     Vector ResolveForces( const Transformation&, const Matrix& );
-//these functions play the damage sounds
-    virtual void ArmorDamageSound( const Vector &pnt );
-    virtual void HullDamageSound( const Vector &pnt );
+
 ///applies damage from the given pnt to the shield, and returns % damage applied and applies lighitn
     float DealDamageToShield( const Vector &pnt, float &Damage );
 /*
@@ -175,45 +179,5 @@ public:
 ///Holds temporary values for inter-function XML communication Saves deprecated restr info
     Matrix WarpMatrix( const Matrix &ctm ) const;
 };
-
-
-
-/*
- ***************************************************************************
- **** Since we now use templates, we have to include GameUnit related    ***
- **** .cpp files in unit.h to avoid problems with some compilers         ***
- ***************************************************************************
- */
-
-/////////////////////////////////////////////////////
-//forward declarations of explicit instantiations, added by chuck_starchaser:
-
-class Asteroid;
-template < class Asteroid >
-class GameUnit;
-
-class Building;
-template < class Building >
-class GameUnit;
-
-class Planet;
-template < class Planet >
-class GameUnit;
-
-class Unit;
-template < class Unit >
-class GameUnit;
-
-class Missile;
-template < class Missile >
-class GameUnit;
-
-class Nebula;
-template < class Nebula >
-class GameUnit;
-
-class Enhancement;
-template < class Enhancement >
-class GameUnit;
 
 #endif

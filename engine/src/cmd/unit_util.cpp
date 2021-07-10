@@ -1,14 +1,14 @@
 #include <string>
 #include "unit_generic.h"
 #include "gfx/cockpit.h"
-#include "planet_generic.h"
+#include "planet.h"
 #include "gfx/animation.h"
 #include "config_xml.h"
 #include "unit_util.h"
 #include "config_xml.h"
 #include "vs_globals.h"
 #include "pilot.h"
-
+#include "universe.h"
 
 using std::string;
 namespace UnitUtil {

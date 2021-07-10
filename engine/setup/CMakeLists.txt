@@ -1,4 +1,4 @@
-IF (NOT BEOS)
+IF ((NOT BEOS) AND (NOT WIN32))
 	#SET_PROPERTY(DIRECTORY PROPERTY INCLUDE_DIRECTORIES "")
 	SET(VEGASETTINGS_SOURCES
 		src/c/setup.cpp
@@ -24,6 +24,13 @@ IF (NOT BEOS)
 	ENDIF(GTK3_FOUND)
 
 	ADD_DEFINITIONS(${GTK_CFLAGS})
-	INCLUDE_DIRECTORIES(${vsUTCS_SOURCE_DIR}/setup/src/include ${vsUTCS_SOURCE_DIR}/src/common ${vsUTCS_BINARY_DIR} ${GTK3_INCLUDE_DIRS})
+	INCLUDE_DIRECTORIES(
+        ${Vega_Strike_SOURCE_DIR}/setup/src/include
+        ${Vega_Strike_SOURCE_DIR}/src/common
+        ${Vega_Strike_BINARY_DIR}
+        ${GTK3_INCLUDE_DIRS}
+    )
 	TARGET_LINK_LIBRARIES(vegasettings ${GTK_LIBS})
-ENDIF (NOT BEOS)
+ELSE ((NOT BEOS) AND (NOT WIN32))
+	MESSAGE ("SKIPPING vegasettings - not supported on this platform at this time")
+ENDIF ((NOT BEOS) AND (NOT WIN32))

@@ -1,5 +1,31 @@
 // -*- mode: c++; c-basic-offset: 4; indent-tabs-mode: nil -*-
 
+/**
+ * unit_csv.cpp
+ *
+ * Copyright (C) Daniel Horn
+ * Copyright (C) 2020 pyramid3d, Stephen G. Tuggy, and other Vega Strike
+ * contributors
+ *
+ * https://github.com/vegastrike/Vega-Strike-Engine-Source
+ *
+ * This file is part of Vega Strike.
+ *
+ * Vega Strike is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * Vega Strike is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with Vega Strike.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+
 #include "unit_generic.h"
 #include "csv.h"
 #include "savegame.h"
@@ -8,7 +34,6 @@
 #include "unit_collide.h"
 #include "collide2/Stdafx.h"
 #include "collide2/CSopcodecollider.h"
-#include "unit_factory.h"
 #include "audiolib.h"
 #include "unit_xml.h"
 #include "gfx/quaternion.h"
@@ -18,7 +43,11 @@
 #include "lin_time.h"
 #include "unit_const_cache.h"
 #include "vs_math.h"
-
+#include "unit.h"
+#include "universe.h"
+#include "vsfilesystem.h"
+#include "mount_size.h"
+#include "weapon_info.h"
 
 CSVRow LookupUnitRow( const string &unitname, const string &faction ) {
     string hashname = unitname+"__"+faction;
@@ -69,7 +98,7 @@ static void UpgradeUnit( Unit *un, const std::string &upgrades )
         const Unit *upgradee = UnitConstCache::getCachedConst( StringIntKey( upgrade, FactionUtil::GetUpgradeFaction() ) );
         if (!upgradee) {
             upgradee = UnitConstCache::setCachedConst( StringIntKey( upgrade, FactionUtil::GetUpgradeFaction() ),
-                                                      UnitFactory::createUnit( upgrade.c_str(),
+                                                      new GameUnit( upgrade.c_str(),
                                                                               true,
                                                                               FactionUtil::GetUpgradeFaction() ) );
         }
@@ -154,7 +183,7 @@ static int nextElementInt( const string &inp, string::size_type &start, string::
     std::pair< string::size_type, string::size_type >rng = nextElementRange( inp, start, end );
     if (rng.second == string::npos && rng.first >= inp.length())
         return def;
-    else if (rng.first == rng.second) 
+    else if (rng.first == rng.second)
         return def;
     else
         return atoi( inp.c_str()+rng.first );
@@ -165,7 +194,7 @@ static double nextElementFloat( const string &inp, string::size_type &start, str
     std::pair< string::size_type, string::size_type >rng = nextElementRange( inp, start, end );
     if (rng.second == string::npos && rng.first >= inp.length())
         return def;
-    else if (rng.first == rng.second) 
+    else if (rng.first == rng.second)
         return def;
     else
         return atof( inp.c_str()+rng.first );
@@ -176,7 +205,7 @@ static double nextElementBool( const string &inp, string::size_type &start, stri
     std::pair< string::size_type, string::size_type >rng = nextElementRange( inp, start, end );
     if (rng.second == string::npos && rng.first >= inp.length())
         return def;
-    else if (rng.first == rng.second) 
+    else if (rng.first == rng.second)
         return def;
     else if (rng.second == string::npos)
         return XMLSupport::parse_bool( inp.substr( rng.first ) );
@@ -271,12 +300,12 @@ static void AddMounts( Unit *thus, Unit::XML &xml, const std::string &mounts )
             Mount mnt( filename, ammo, volume, xml.unitscale*xyscale, xml.unitscale*zscale, func, maxfunc, banked );
             mnt.SetMountOrientation( Quaternion::from_vectors( P.Cast(), Q.Cast(), R.Cast() ) );
             mnt.SetMountPosition( xml.unitscale*pos.Cast() );
-            int   mntsiz = weapon_info::NOWEAP;
+            int   mntsiz = as_integer(MOUNT_SIZE::NOWEAP);
             if ( mountsize.length() ) {
                 mntsiz   = parseMountSizes( mountsize.c_str() );
                 mnt.size = mntsiz;
             } else {
-                mnt.size = mnt.type->size;
+                mnt.size = as_integer(mnt.type->size);
             }
             thus->mounts.push_back( mnt );
         } else {ofs = string::npos; }}
@@ -285,20 +314,21 @@ static void AddMounts( Unit *thus, Unit::XML &xml, const std::string &mounts )
         static bool half_sounds = XMLSupport::parse_bool( vs_config->getVariable( "audio", "every_other_mount", "false" ) );
         if ( (a&1) == parity ) {
             int b = a;
-            if ( (a&3) == 2 && (int) a < (thus->GetNumMounts()-1) ) {
-                if (thus->mounts[a].type->type != weapon_info::PROJECTILE 
-                    && thus->mounts[a+1].type->type != weapon_info::PROJECTILE)
+            if ( (a&3) == 2 && (int) a < (thus->getNumMounts()-1) ) {
+                if (thus->mounts[a].type->type != WEAPON_TYPE::PROJECTILE
+                    && thus->mounts[a+1].type->type != WEAPON_TYPE::PROJECTILE)
                 {
                     b = a+1;
                 }
             }
             thus->mounts[b].sound = AUDCreateSound( thus->mounts[b].type->sound, false );
-        } else if ( (!half_sounds) || thus->mounts[a].type->type == weapon_info::PROJECTILE ) {
+        } else if ( (!half_sounds) || thus->mounts[a].type->type == WEAPON_TYPE::PROJECTILE ) {
             thus->mounts[a].sound = AUDCreateSound( thus->mounts[a].type->sound, false );
         }
         if (a > 0)
-            if (thus->mounts[a].sound == thus->mounts[a-1].sound && thus->mounts[a].sound != -1)
-                printf( "Sound error\n" );
+            if (thus->mounts[a].sound == thus->mounts[a-1].sound && thus->mounts[a].sound != -1) {
+                BOOST_LOG_TRIVIAL(error) << "Sound error";
+            }
     }
 }
 
@@ -351,7 +381,7 @@ static vector< SubUnitStruct >GetSubUnits( const std::string &subunits )
 
             ret.push_back( SubUnitStruct( filename, pos, Q, R, restricted ) );
         } else {
-            ofs = string::npos; 
+            ofs = string::npos;
         }
     }
     return ret;
@@ -367,7 +397,7 @@ static void AddSubUnits( Unit *thus, Unit::XML &xml, const std::string &subunits
         QVector Q   = (*i).Q;
         QVector R   = (*i).R;
         double  restricted = (*i).restricted;
-        xml.units.push_back( UnitFactory::createUnit( filename.c_str(), true, faction, modification, NULL ) );         //I set here the fg arg to NULL
+        xml.units.push_back( new GameUnit( filename.c_str(), true, faction, modification, NULL ) );         //I set here the fg arg to NULL
         if (xml.units.back()->name == "LOAD_FAILED") {
             xml.units.back()->limits.yaw = 0;
             xml.units.back()->limits.pitch = 0;
@@ -391,7 +421,7 @@ static void AddSubUnits( Unit *thus, Unit::XML &xml, const std::string &subunits
     for (int a = xml.units.size()-1; a >= 0; a--) {
         bool randomspawn = xml.units[a]->name.get().find( "randomspawn" ) != string::npos;
         if (randomspawn) {
-            int chancetospawn = float_to_int( xml.units[a]->WarpCapData() );
+            int chancetospawn = float_to_int( xml.units[a]->warpCapData() );
             if (chancetospawn > rand()%100)
                 thus->SubUnits.prepend( xml.units[a] );
 
@@ -494,7 +524,7 @@ static void ImportCargo( Unit *thus, const string &imports )
         int nelem = 0;
         while ( ( ofs = imports.find( '{', ofs ) ) != string::npos )
             nelem++, ofs++;
-        thus->pImage->cargo.reserve( nelem+thus->pImage->cargo.size() );
+        thus->cargo.reserve( nelem+thus->cargo.size() );
         ofs = 0;
     }
     while ( ( where = imports.find( '{', ofs ) ) != string::npos ) {
@@ -522,7 +552,7 @@ static void AddCarg( Unit *thus, const string &cargos )
         int nelem = 0;
         while ( ( ofs = cargos.find( '{', ofs ) ) != string::npos )
             nelem++, ofs++;
-        thus->pImage->cargo.reserve( nelem+thus->pImage->cargo.size() );
+        thus->cargo.reserve( nelem+thus->cargo.size() );
         ofs = 0;
     }
     while ( ( where = cargos.find( '{', ofs ) ) != string::npos ) {
@@ -541,12 +571,12 @@ static void AddCarg( Unit *thus, const string &cargos )
             carg.maxfunctionality = nextElementFloat( cargos, elemstart, elemend, 1.f );
             carg.description      = nextElementString( cargos, elemstart, elemend );
             carg.mission          = nextElementBool( cargos, elemstart, elemend, false );
-            carg.installed        = nextElementBool( cargos, elemstart, elemend, 
+            carg.installed        = nextElementBool( cargos, elemstart, elemend,
                 carg.category.get().find("upgrades/") == 0 );
 
             thus->AddCargo( carg, false );
         } else {
-            ofs = string::npos; 
+            ofs = string::npos;
         }
     }
 }
@@ -587,60 +617,7 @@ string WriteHudDamageFunc( Unit *un )
     return ret;
 }
 
-void AddSounds( Unit *thus, string sounds )
-{
-    if (sounds.length() != 0) {
-        string tmp = nextElement( sounds );
-        if ( tmp.length() )
-            thus->sound->shield = AUDCreateSoundWAV( tmp, false );
-        tmp = nextElement( sounds );
-        if ( tmp.length() )
-            thus->sound->armor = AUDCreateSoundWAV( tmp, false );
-        tmp = nextElement( sounds );
-        if ( tmp.length() )
-            thus->sound->hull = AUDCreateSoundWAV( tmp, false );
-        tmp = nextElement( sounds );
-        if ( tmp.length() )
-            thus->sound->jump = AUDCreateSoundWAV( tmp, false );
-        tmp = nextElement( sounds );
-        if ( tmp.length() )
-            thus->sound->explode = AUDCreateSoundWAV( tmp, false );
-        tmp = nextElement( sounds );
-        if ( tmp.length() )
-            thus->sound->cloak = AUDCreateSoundWAV( tmp, false );
-        tmp = nextElement( sounds );
-        if ( tmp.length() )
-            thus->sound->engine = AUDCreateSoundWAV( tmp, true );
-    }
-    if (thus->sound->cloak == -1) {
-        static std::string ssound = vs_config->getVariable( "unitaudio", "cloak", "sfx43.wav" );
-        thus->sound->cloak = AUDCreateSound( ssound, false );
-    }
-    if (thus->sound->engine == -1) {
-        static std::string ssound = vs_config->getVariable( "unitaudio", "afterburner", "sfx10.wav" );
-        thus->sound->engine = AUDCreateSound( ssound, false );
-    }
-    if (thus->sound->shield == -1) {
-        static std::string ssound = vs_config->getVariable( "unitaudio", "shield", "sfx09.wav" );
-        thus->sound->shield = AUDCreateSound( ssound, false );
-    }
-    if (thus->sound->armor == -1) {
-        static std::string ssound = vs_config->getVariable( "unitaudio", "armor", "sfx08.wav" );
-        thus->sound->armor = AUDCreateSound( ssound, false );
-    }
-    if (thus->sound->hull == -1) {
-        static std::string ssound = vs_config->getVariable( "unitaudio", "armor", "sfx08.wav" );
-        thus->sound->hull = AUDCreateSound( ssound, false );
-    }
-    if (thus->sound->explode == -1) {
-        static std::string ssound = vs_config->getVariable( "unitaudio", "explode", "explosion.wav" );
-        thus->sound->explode = AUDCreateSound( ssound, false );
-    }
-    if (thus->sound->jump == -1) {
-        static std::string ssound = vs_config->getVariable( "unitaudio", "explode", "sfx43.wav" );
-        thus->sound->jump = AUDCreateSound( ssound, false );
-    }
-}
+
 
 void LoadCockpit( Unit *thus, const string &cockpit )
 {
@@ -774,7 +751,7 @@ void Unit::LoadRow( CSVRow &row, string modification, string *netxml )
     DEF_OPTIMIZER( Armor_Front_Bottom_Right );
     DEF_OPTIMIZER( Armor_Back_Bottom_Left );
     DEF_OPTIMIZER( Armor_Back_Bottom_Right );
-    DEF_OPTIMIZER( Description );  // What was this supposed to describe?
+//    DEF_OPTIMIZER( Description );  // What was this supposed to describe? - compiler complained that it's not used.
     DEF_OPTIMIZER( Shield_Front_Top_Left );
     DEF_OPTIMIZER( Shield_Front_Top_Right );
     DEF_OPTIMIZER( Shield_Back_Top_Left );
@@ -861,7 +838,7 @@ void Unit::LoadRow( CSVRow &row, string modification, string *netxml )
         static bool optimizer_keys_init = false;
         if (!optimizer_keys_init) {
             optimizer_keys_init = true;
-            printf( "Initializing optimizer\n" );
+            BOOST_LOG_TRIVIAL(info) << "Initializing optimizer";
             INIT_OPTIMIZER( keys, Name );
             INIT_OPTIMIZER( keys, Hud_image );
             INIT_OPTIMIZER( keys, FaceCamera );
@@ -897,7 +874,7 @@ void Unit::LoadRow( CSVRow &row, string modification, string *netxml )
             INIT_OPTIMIZER( keys, Armor_Front_Bottom_Right );
             INIT_OPTIMIZER( keys, Armor_Back_Bottom_Left );
             INIT_OPTIMIZER( keys, Armor_Back_Bottom_Right );
-            INIT_OPTIMIZER( keys, Description );
+//            INIT_OPTIMIZER( keys, Description );      // Compiler complained that this is not used
             INIT_OPTIMIZER( keys, Shield_Front_Top_Left );
             INIT_OPTIMIZER( keys, Shield_Front_Top_Right );
             INIT_OPTIMIZER( keys, Shield_Back_Top_Left );
@@ -1027,13 +1004,17 @@ void Unit::LoadRow( CSVRow &row, string modification, string *netxml )
     corner_max = Vector( -FLT_MAX, -FLT_MAX, -FLT_MAX );
     calculate_extent( false );
     AddMounts( this, xml, OPTIM_GET( row, table, Mounts ) );
-    this->pImage->CargoVolume = ::stof( OPTIM_GET( row, table, Hold_Volume ) );
-    this->pImage->HiddenCargoVolume = ::stof( OPTIM_GET( row, table, Hidden_Hold_Volume ) );
-    this->pImage->UpgradeVolume     = ::stof( OPTIM_GET( row, table, Upgrade_Storage_Volume ) );
-    this->pImage->equipment_volume  = ::stof( OPTIM_GET( row, table, Equipment_Space ) );
+    this->CargoVolume = ::stof( OPTIM_GET( row, table, Hold_Volume ) );
+    this->HiddenCargoVolume = ::stof( OPTIM_GET( row, table, Hidden_Hold_Volume ) );
+    this->UpgradeVolume     = ::stof( OPTIM_GET( row, table, Upgrade_Storage_Volume ) );
+    this->equipment_volume  = ::stof( OPTIM_GET( row, table, Equipment_Space ) );
     ImportCargo( this, OPTIM_GET( row, table, Cargo_Import ) );     //if this changes change planet_generic.cpp
     AddCarg( this, OPTIM_GET( row, table, Cargo ) );
-    AddSounds( this, OPTIM_GET( row, table, Sounds ) );
+
+    // Replaced by below: AddSounds( this, OPTIM_GET( row, table, Sounds ) );
+    this->addSounds(&nextElement, OPTIM_GET( row, table, Sounds ));
+
+
     LoadCockpit( this, OPTIM_GET( row, table, Cockpit ) );
     pImage->CockpitCenter.i = ::stof( OPTIM_GET( row, table, CockpitX ) )*xml.unitscale;
     pImage->CockpitCenter.j = ::stof( OPTIM_GET( row, table, CockpitY ) )*xml.unitscale;
@@ -1055,9 +1036,11 @@ void Unit::LoadRow( CSVRow &row, string modification, string *netxml )
     Shield two;
     Shield four;
     Shield eight;
-    memset( &two, 0, sizeof (Shield) );
-    memset( &four, 0, sizeof (Shield) );
-    memset( &eight, 0, sizeof (Shield) );
+/*    It looks like the shields are initialized properly anyways
+ *    memset( &two, 0, sizeof (Shield) );
+ *    memset( &four, 0, sizeof (Shield) );
+ *    memset( &eight, 0, sizeof (Shield) );
+ */
     shieldcount += AssignIf( OPTIM_GET( row, table, Shield_Front_Top_Right ),
                              two.shield2fb.front, four.shield4fbrl.front, eight.shield8.frontrighttop );
     shieldcount += AssignIf( OPTIM_GET( row, table, Shield_Front_Top_Left ),
@@ -1099,7 +1082,7 @@ void Unit::LoadRow( CSVRow &row, string modification, string *netxml )
     int   iter;
     if (shieldcount > MAX_SHIELD_NUMBER)
         shieldcount = MAX_SHIELD_NUMBER;
-    memset( shield.range, 0, sizeof (shield.range) );
+ //   memset( shield.range, 0, sizeof (shield.range) );   The range is properly initialized anyways
     if (shieldcount == 8) {
         shield.number = 8;
         shield.shield.cur[0]     = shield.shield.max[0] = eight.shield8.frontlefttopmax;
@@ -1214,7 +1197,7 @@ void Unit::LoadRow( CSVRow &row, string modification, string *netxml )
     recharge   = ::stof( OPTIM_GET( row, table, Reactor_Recharge ) );
     jump.drive = XMLSupport::parse_bool( OPTIM_GET( row, table, Jump_Drive_Present ) ) ? -1 : -2;
     jump.delay = ::stoi( OPTIM_GET( row, table, Jump_Drive_Delay ) );
-    pImage->forcejump = XMLSupport::parse_bool( OPTIM_GET( row, table, Wormhole ) );
+    forcejump = XMLSupport::parse_bool( OPTIM_GET( row, table, Wormhole ) );
     graphicOptions.RecurseIntoSubUnitsOnCollision = stob( OPTIM_GET( row,
                                                                      table,
                                                                      Collide_Subunits ),
@@ -1328,34 +1311,34 @@ void Unit::LoadRow( CSVRow &row, string modification, string *netxml )
     computer.radar.lockcone     = cos( stof( OPTIM_GET( row, table, Lock_Cone ), 180 )*VS_PI/180 );
     cloakmin = (int) (::stof( OPTIM_GET( row, table, Cloak_Min ) )*2147483136);
     if (cloakmin < 0) cloakmin = 0;
-    pImage->cloakglass = XMLSupport::parse_bool( OPTIM_GET( row, table, Cloak_Glass ) );
-    if ( (cloakmin&0x1) && !pImage->cloakglass )
+    cloakglass = XMLSupport::parse_bool( OPTIM_GET( row, table, Cloak_Glass ) );
+    if ( (cloakmin&0x1) && !cloakglass )
         cloakmin -= 1;
-    if ( (cloakmin&0x1) == 0 && pImage->cloakglass )
+    if ( (cloakmin&0x1) == 0 && cloakglass )
         cloakmin += 1;
     if ( !XMLSupport::parse_bool( OPTIM_GET( row, table, Can_Cloak ) ) )
         cloaking = -1;
     else
         cloaking = (int) (-2147483647)-1;
-    pImage->cloakrate    = (int) ( 2147483136.*::stof( OPTIM_GET( row, table, Cloak_Rate ) ) );     //short fix
-    pImage->cloakenergy  = ::stof( OPTIM_GET( row, table, Cloak_Energy ) );
-    pImage->repair_droid = ::stoi( OPTIM_GET( row, table, Repair_Droid ) );
-    pImage->ecm    = ::stoi( OPTIM_GET( row, table, ECM_Rating ) );
+    cloakrate    = (int) ( 2147483136.*::stof( OPTIM_GET( row, table, Cloak_Rate ) ) );     //short fix
+    cloakenergy  = ::stof( OPTIM_GET( row, table, Cloak_Energy ) );
+    repair_droid = ::stoi( OPTIM_GET( row, table, Repair_Droid ) );
+    ecm    = ::stoi( OPTIM_GET( row, table, ECM_Rating ) );
 
     this->HeatSink = ::stof( OPTIM_GET( row, table, Heat_Sink_Rating ) );
-    if (pImage->ecm < 0) pImage->ecm *= -1;
+    if (ecm < 0) ecm *= -1;
     if (pImage->cockpit_damage) {
         HudDamage( pImage->cockpit_damage, OPTIM_GET( row, table, Hud_Functionality ) );
         HudDamage( pImage->cockpit_damage+1+MAXVDUS+UnitImages< void >::NUMGAUGES, OPTIM_GET( row, table, Max_Hud_Functionality ) );
     }
-    pImage->LifeSupportFunctionality    = ::stof( OPTIM_GET_DEF( row, table, Lifesupport_Functionality, "1" ) );
-    pImage->LifeSupportFunctionalityMax = ::stof( OPTIM_GET_DEF( row, table, Max_Lifesupport_Functionality, "1" ) );
-    pImage->CommFunctionality = ::stof( OPTIM_GET_DEF( row, table, Comm_Functionality, "1" ) );
-    pImage->CommFunctionalityMax = ::stof( OPTIM_GET_DEF( row, table, Max_Comm_Functionality, "1" ) );
-    pImage->fireControlFunctionality    = ::stof( OPTIM_GET_DEF( row, table, FireControl_Functionality, "1" ) );
-    pImage->fireControlFunctionalityMax = ::stof( OPTIM_GET_DEF( row, table, Max_FireControl_Functionality, "1" ) );
-    pImage->SPECDriveFunctionality = ::stof( OPTIM_GET_DEF( row, table, SPECDrive_Functionality, "1" ) );
-    pImage->SPECDriveFunctionalityMax   = ::stof( OPTIM_GET_DEF( row, table, Max_SPECDrive_Functionality, "1" ) );
+    LifeSupportFunctionality    = ::stof( OPTIM_GET_DEF( row, table, Lifesupport_Functionality, "1" ) );
+    LifeSupportFunctionalityMax = ::stof( OPTIM_GET_DEF( row, table, Max_Lifesupport_Functionality, "1" ) );
+    CommFunctionality = ::stof( OPTIM_GET_DEF( row, table, Comm_Functionality, "1" ) );
+    CommFunctionalityMax = ::stof( OPTIM_GET_DEF( row, table, Max_Comm_Functionality, "1" ) );
+    fireControlFunctionality    = ::stof( OPTIM_GET_DEF( row, table, FireControl_Functionality, "1" ) );
+    fireControlFunctionalityMax = ::stof( OPTIM_GET_DEF( row, table, Max_FireControl_Functionality, "1" ) );
+    SPECDriveFunctionality = ::stof( OPTIM_GET_DEF( row, table, SPECDrive_Functionality, "1" ) );
+    SPECDriveFunctionalityMax   = ::stof( OPTIM_GET_DEF( row, table, Max_SPECDrive_Functionality, "1" ) );
     computer.slide_start = ::stoi( OPTIM_GET( row, table, Slide_Start ) );
     computer.slide_end   = ::stoi( OPTIM_GET( row, table, Slide_End ) );
     UpgradeUnit( this, OPTIM_GET( row, table, Upgrades ) );
@@ -1471,10 +1454,11 @@ void Unit::WriteUnit( const char *modifications )
         bool bad = false;
         if (!modifications) bad = true;
         if (!bad)
-            if ( !strlen( modifications ) )
+            if ( !strlen( modifications ) ) {
                 bad = true;
+            }
         if (bad) {
-            fprintf( stderr, "Cannot Write out unit file %s %s that has no filename\n", name.get().c_str(), csvRow.get().c_str() );
+            BOOST_LOG_TRIVIAL(error) << boost::format("Cannot Write out unit file %1% %2% that has no filename") % name.get().c_str() % csvRow.get().c_str();
             return;
         }
         std::string savedir = modifications;
@@ -1482,7 +1466,7 @@ void Unit::WriteUnit( const char *modifications )
         VSFile  f;
         VSError err = f.OpenCreateWrite( savedir+"/"+name+".csv", UnitFile );
         if (err > Ok) {
-            fprintf( stderr, "!!! ERROR : Writing saved unit file : %s\n", f.GetFullPath().c_str() );
+            BOOST_LOG_TRIVIAL(error) << boost::format("!!! ERROR : Writing saved unit file : %1%") % f.GetFullPath().c_str();
             return;
         }
         std::string towrite = WriteUnitString();
@@ -1538,10 +1522,10 @@ string Unit::WriteUnitString()
                     if (jj != 0)
                         unit[row.getKey( jj )] = row[jj];
                 //mutable things
-                unit["Equipment_Space"] = XMLSupport::tostring( pImage->equipment_volume );
-                unit["Hold_Volume"] = XMLSupport::tostring( pImage->CargoVolume );
-                unit["Hidden_Hold_Volume"]     = XMLSupport::tostring( pImage->HiddenCargoVolume );
-                unit["Upgrade_Storage_Volume"] = XMLSupport::tostring( pImage->UpgradeVolume );
+                unit["Equipment_Space"] = XMLSupport::tostring( equipment_volume );
+                unit["Hold_Volume"] = XMLSupport::tostring( CargoVolume );
+                unit["Hidden_Hold_Volume"]     = XMLSupport::tostring( HiddenCargoVolume );
+                unit["Upgrade_Storage_Volume"] = XMLSupport::tostring( UpgradeVolume );
                 string mountstr;
                 double unitScale = stof( unit["Unit_Scale"], 1 );
                 {
@@ -1552,11 +1536,11 @@ string Unit::WriteUnitString()
                         Transformation tr( mounts[j].GetMountOrientation(),
                                           mounts[j].GetMountLocation().Cast() );
                         tr.to_matrix( m );
-                        string printedname = mounts[j].type->weapon_name;
+                        string printedname = mounts[j].type->name;
                         if (mounts[j].status == Mount::DESTROYED || mounts[j].status == Mount::UNCHOSEN)
                             printedname = "";
                         mountstr += "{"+printedname+";"+XMLSupport::tostring( mounts[j].ammo )+";"+XMLSupport::tostring(
-                            mounts[j].volume )+";"+lookupMountSize( mounts[j].size );
+                            mounts[j].volume )+";"+getMountSizeString( mounts[j].size );
                         sprintf( mnt, ";%lf;%lf;%lf;%lf;%lf;%lf;%lf;%lf;%lf;%lf;%lf;%lf;%lf}",
                                  m.p.i/unitScale,
                                  m.p.j/unitScale,
@@ -1690,7 +1674,7 @@ string Unit::WriteUnitString()
                 unit["Reactor_Recharge"] = tos( recharge );
                 unit["Jump_Drive_Present"] = tos( jump.drive >= -1 );
                 unit["Jump_Drive_Delay"] = tos( jump.delay );
-                unit["Wormhole"] = tos( pImage->forcejump != 0 );
+                unit["Wormhole"] = tos( forcejump != 0 );
                 unit["Outsystem_Jump_Cost"] = tos( jump.energy );
                 unit["Warp_Usage_Cost"] = tos( jump.insysenergy );
                 unit["Afterburner_Usage_Cost"]        = tos( afterburnenergy );
@@ -1722,24 +1706,24 @@ string Unit::WriteUnitString()
                 unit["Lock_Cone"]                     = tos( acos( computer.radar.lockcone )*180./VS_PI );
                 unit["Cloak_Min"]                     = tos( cloakmin/2147483136. );
                 unit["Can_Cloak"]                     = tos( cloaking != -1 );
-                unit["Cloak_Rate"]                    = tos( fabs( pImage->cloakrate/2147483136. ) );
-                unit["Cloak_Energy"]                  = tos( pImage->cloakenergy );
-                unit["Cloak_Glass"]                   = tos( pImage->cloakglass );
-                unit["Repair_Droid"]                  = tos( pImage->repair_droid );
-                unit["ECM_Rating"]                    = tos( pImage->ecm > 0 ? pImage->ecm : -pImage->ecm );
+                unit["Cloak_Rate"]                    = tos( fabs( cloakrate/2147483136. ) );
+                unit["Cloak_Energy"]                  = tos( cloakenergy );
+                unit["Cloak_Glass"]                   = tos( cloakglass );
+                unit["Repair_Droid"]                  = tos( repair_droid );
+                unit["ECM_Rating"]                    = tos( ecm > 0 ? ecm : -ecm );
                 unit["Hud_Functionality"]             = WriteHudDamage( this );
                 unit["Max_Hud_Functionality"]         = WriteHudDamageFunc( this );
                 unit["Heat_Sink_Rating"]              = tos( this->HeatSink );
-                unit["Lifesupport_Functionality"]     = tos( pImage->LifeSupportFunctionality );
-                unit["Max_Lifesupport_Functionality"] = tos( pImage->LifeSupportFunctionalityMax );
-                unit["Comm_Functionality"]            = tos( pImage->CommFunctionality );
-                unit["Max_Comm_Functionality"]        = tos( pImage->CommFunctionalityMax );
-                unit["Comm_Functionality"]            = tos( pImage->CommFunctionality );
-                unit["Max_Comm_Functionality"]        = tos( pImage->CommFunctionalityMax );
-                unit["FireControl_Functionality"]     = tos( pImage->fireControlFunctionality );
-                unit["Max_FireControl_Functionality"] = tos( pImage->fireControlFunctionalityMax );
-                unit["SPECDrive_Functionality"]       = tos( pImage->SPECDriveFunctionality );
-                unit["Max_SPECDrive_Functionality"]   = tos( pImage->SPECDriveFunctionalityMax );
+                unit["Lifesupport_Functionality"]     = tos( LifeSupportFunctionality );
+                unit["Max_Lifesupport_Functionality"] = tos( LifeSupportFunctionalityMax );
+                unit["Comm_Functionality"]            = tos( CommFunctionality );
+                unit["Max_Comm_Functionality"]        = tos( CommFunctionalityMax );
+                unit["Comm_Functionality"]            = tos( CommFunctionality );
+                unit["Max_Comm_Functionality"]        = tos( CommFunctionalityMax );
+                unit["FireControl_Functionality"]     = tos( fireControlFunctionality );
+                unit["Max_FireControl_Functionality"] = tos( fireControlFunctionalityMax );
+                unit["SPECDrive_Functionality"]       = tos( SPECDriveFunctionality );
+                unit["Max_SPECDrive_Functionality"]   = tos( SPECDriveFunctionalityMax );
                 unit["Slide_Start"]                   = tos( computer.slide_start );
                 unit["Slide_End"]                     = tos( computer.slide_end );
                 unit["Cargo_Import"]                  = unit["Upgrades"] = "";                 //make sure those are empty
@@ -1757,12 +1741,14 @@ string Unit::WriteUnitString()
                 return writeCSV( keys, values );
             }
         }
-        fprintf( stderr, "Failed to locate base mesh for %s %s %s\n", csvRow.get().c_str(), name.get().c_str(), fullname.c_str() );
+        BOOST_LOG_TRIVIAL(error) << boost::format("Failed to locate base mesh for %1% %2% %3%") % csvRow.get().c_str() % name.get().c_str() % fullname.c_str();
     } else {
-        if (pImage->unitwriter)
+        if (pImage->unitwriter) {
             ret = pImage->unitwriter->WriteString();
-        for (un_iter ui = getSubUnits(); (*ui) != NULL; ++ui)
+        }
+        for (un_iter ui = getSubUnits(); (*ui) != NULL; ++ui) {
             ret = ret+( (*ui)->WriteUnitString() );
+        }
     }
     return ret;
 }
@@ -1786,10 +1772,10 @@ void UpdateMasterPartList( Unit *ret )
             carg.mass        = (j < addedcargomass->size() ? XMLSupport::parse_float( (*addedcargomass)[j] ) : .01);
             carg.description = ( j < addedcargodesc->size() ? (*addedcargodesc)[j] : std::string( "No Description Added" ) );
             carg.quantity    = 1;
-            ret->GetImageInformation().cargo.push_back( carg );
+            ret->cargo.push_back( carg );
         }
     }
-    std::sort( ret->GetImageInformation().cargo.begin(), ret->GetImageInformation().cargo.end() );
+    std::sort( ret->cargo.begin(), ret->cargo.end() );
     {
         Cargo last_cargo;
         for (int i = ret->numCargo()-1; i >= 0; --i) {
@@ -1802,37 +1788,5 @@ void UpdateMasterPartList( Unit *ret )
     }
 }
 
-Unit* Unit::makeMasterPartList()
-{
-    unsigned int i;
-    static std::string mpl = vs_config->getVariable( "data", "master_part_list", "master_part_list" );
-    CSVTable *table = loadCSVTableList(mpl, VSFileSystem::UnknownFile, false);
-    
-    Unit *ret = new Unit();
-    ret->name = "master_part_list";
-    if (table) {
-        vsUMap< std::string, int >::const_iterator it;
-        for (it = table->rows.begin(); it != table->rows.end(); ++it) {
-            CSVRow row( table, it->second );
-            Cargo  carg;
-            carg.content     = row["file"];
-            carg.category    = row["categoryname"];
-            carg.volume      = stof( row["volume"], 1 );
-            carg.mass        = stof( row["mass"], 1 );
-            carg.quantity    = 1;
-            carg.price       = stoi( row["price"], 1 );
-            carg.description = row["description"];
-            ret->GetImageInformation().cargo.push_back( carg );
-        }
-        delete table;
-    }
-    UpdateMasterPartList( ret );
-    if ( !ret->GetCargo( "Pilot", i ) )     //required items
-        ret->AddCargo( Cargo( "Pilot", "Contraband", 800, 1, .01, 1, 1.0, 1.0 ), true );
-    if ( !ret->GetCargo( "Hitchhiker", i ) )
-        ret->AddCargo( Cargo( "Hitchhiker", "Passengers", 42, 1, .01, 5.0, 1.0, 1.0 ), true );
-    if ( !ret->GetCargo( "Slaves", i ) )
-        ret->AddCargo( Cargo( "Slaves", "Contraband", 800, 1, .01, 1, 1, 1 ), true );
-    return ret;
-}
+
 

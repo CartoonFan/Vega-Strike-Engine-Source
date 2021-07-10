@@ -1,3 +1,29 @@
+/**
+ * vdu.cpp
+ *
+ * Copyright (C) Daniel Horn
+ * Copyright (C) 2020 pyramid3d, Stephen G. Tuggy, and other Vega Strike
+ * contributors
+ *
+ * https://github.com/vegastrike/Vega-Strike-Engine-Source
+ *
+ * This file is part of Vega Strike.
+ *
+ * Vega Strike is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * Vega Strike is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with Vega Strike.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+
 /// Draws VDU parts
 /// Draws shield, armor, comm strings and animation, messages, manifest,
 /// target info, and objectives
@@ -21,6 +47,9 @@
 #include "universe_util.h"
 #include "vsfilesystem.h"
 #include "cmd/ai/communication.h"
+#include "universe.h"
+#include "mount_size.h"
+#include "weapon_info.h"
 
 template < typename T >
 inline T mymin( T a, T b )
@@ -60,11 +89,11 @@ string reformatName( string nam )
 string getUnitNameAndFgNoBase( Unit *target )
 {
     Flightgroup *fg = target->getFlightgroup();
-    if (target->isUnit() == PLANETPTR) {
+    if (target->isUnit() == _UnitType::planet) {
         string hr = ( (Planet*) target )->getHumanReadablePlanetType();
         if ( !hr.empty() )
             return hr+string( ":" )+reformatName( target->name );
-    } else if (target->isUnit() == UNITPTR) {
+    } else if (target->isUnit() == _UnitType::unit) {
         if (fg) {
             int    fgsnumber = target->getFgSubnumber();
             string fgnstring = XMLSupport::tostring( fgsnumber );
@@ -159,9 +188,6 @@ VDU::VDU( const char *file, TextPlane *textp, unsigned short modes, short rwws, 
     maxhull    = mh;
     got_target_info = true;
     SwitchMode( NULL );
-
-    //printf("\nVDU rows=%d,col=%d\n",rows,cols);
-    //cout << "vdu" << endl;
 }
 
 GFXColor getDamageColor( float armor, bool gradient = false )
@@ -224,7 +250,7 @@ static void DrawHUDSprite( VDU *thus,
         s->SetSize( w, invertsprite ? -h : h );
         Texture *spritetex = s->getTexture();
         if (drawsprite && spritetex) {
-            static const float middle_point =
+            static float middle_point =
                 XMLSupport::parse_float( vs_config->getVariable( "graphics", "hud", "armor_hull_size", ".55" ) );
             static bool top_view = XMLSupport::parse_bool( vs_config->getVariable( "graphics", "hud", "top_view", "false" ) );
             float  middle_point_small = 1-middle_point;
@@ -639,7 +665,7 @@ VSSprite * getNavImage()
 double DistanceTwoTargets( Unit *parent, Unit *target )
 {
     double tmp =
-        ( ( parent->Position()-target->Position() ).Magnitude()-( (target->isUnit() == PLANETPTR) ? target->rSize() : 0 ) );
+        ( ( parent->Position()-target->Position() ).Magnitude()-( (target->isUnit() == _UnitType::planet) ? target->rSize() : 0 ) );
     if (tmp < 0) return 0;
     return tmp;
 }
@@ -734,9 +760,9 @@ void VDU::DrawTarget( GameCockpit *cp, Unit *parent, Unit *target )
         au = ad;
         ad = tmp;
     }
-    if (target->isUnit() == PLANETPTR)
+    if (target->isUnit() == _UnitType::planet)
         au = ar = al = ad = target->GetHullPercent();
-    DrawHUDSprite( this, ( (target->isUnit() != PLANETPTR || target->getHudImage() != NULL) ? target->getHudImage()
+    DrawHUDSprite( this, ( (target->isUnit() != _UnitType::planet || target->getHudImage() != NULL) ? target->getHudImage()
                           : ( target->GetDestinations().size() != 0 ? getJumpImage()
                              : ( ( (Planet*) target )->hasLights() ? getSunImage()
                                 : ( target->getFullname().find(
@@ -787,7 +813,7 @@ void VDU::DrawTarget( GameCockpit *cp, Unit *parent, Unit *target )
         newst += '\n';
         double dist = DistanceTwoTargets( parent, target );
         double actual_range = dist;
-        if ( (target->isUnit() == PLANETPTR) && (target->CanDockWithMe( parent, 1 ) != -1) ) {
+        if ( (target->isUnit() == _UnitType::planet) && (target->CanDockWithMe( parent, 1 ) != -1) ) {
             dist -= target->rSize()*UniverseUtil::getPlanetRadiusPercent();
             if (dist < 0)
                 newst += string( "Docking: Ready" );
@@ -816,7 +842,7 @@ void VDU::DrawTarget( GameCockpit *cp, Unit *parent, Unit *target )
         }
         //this is a possibility to draw target shields but without gauging
         //the gauging method is implemented in cockpit.cpp
-/*  if (target->isUnit()!=PLANETPTR) {
+/*  if (target->isUnit()!=_UnitType::planet) {
  *   GFXEnable (TEXTURE0);
  *   //Dev:GFXColor4f (1,target->GetHullPercent(),target->GetHullPercent(),1);
  *   DrawHUDSprite(this,getTargetQuadShield(),0.9,x,y,w,h,fs,rs,ls,bs,target->GetHullPercent(),true,invert_target_sprite);
@@ -841,7 +867,6 @@ void VDU::DrawTarget( GameCockpit *cp, Unit *parent, Unit *target )
 
 void VDU::DrawMessages( GameCockpit *parentcp, Unit *target )
 {
-    static bool network_draw_messages = XMLSupport::parse_bool( vs_config->getVariable( "graphics", "network_chat_text", "true" ) );
     static bool draw_messages = XMLSupport::parse_bool( vs_config->getVariable( "graphics", "chat_text", "true" ) );
 
     if (draw_messages == false)
@@ -896,7 +921,6 @@ void VDU::DrawMessages( GameCockpit *parentcp, Unit *target )
             //fullstr=fullstr+mymsg+"\n";
 
             rows_used += rows_needed+1;
-            //cout << "nav  " << mymsg << " rows " << rows_needed << endl;
         }
     }
     static std::string newline( "\n" );
@@ -976,9 +1000,6 @@ void VDU::DrawNav( GameCockpit *cp, Unit *you, Unit *targ, const Vector &nav )
     if (targ)
         nam = reformatName( targ->name );
     int    faction = FactionUtil::GetFactionIndex( UniverseUtil::GetGalaxyFaction( _Universe->activeStarSystem()->getFileName() ) );
-    //std::string systemname = _Universe->activeStarSystem()->getFileName(); // as Sector/System
-    //string sectorname = getStarSystemSector(systemname);
-    //printf ("(debug) Sector: %s\n", sectorname.c_str());
     std::string navdata =
         std::string( "#ff0000Sector:\n     #ffff00"+getStarSystemSector(
                          _Universe->activeStarSystem()->getFileName() )
@@ -1112,22 +1133,22 @@ void VDU::DrawManifest( Unit *parent, Unit *target )
     tp->bgcol = tpbg;
 }
 
-static void DrawGun( Vector pos, float w, float h, weapon_info::MOUNT_SIZE sz )
+static void DrawGun( Vector pos, float w, float h, MOUNT_SIZE sz )
 {
     w = fabs( w );
     h      = fabs( h );
     float oox = 1./g_game.x_resolution;
     float ooy = 1./g_game.y_resolution;
     pos.j -= h/3.8;
-    if (sz == weapon_info::NOWEAP) {
+    if (sz == MOUNT_SIZE::NOWEAP) {
         GFXPointSize( 4 );
         const float verts[3] = {
             pos.x, pos.y, pos.z
         };
         GFXDraw( GFXPOINT, verts, 1 );
         GFXPointSize( 1 );
-    } else if (sz < weapon_info::SPECIAL) {
-        if (sz == weapon_info::LIGHT) {
+    } else if (sz < MOUNT_SIZE::SPECIAL) {
+        if (sz == MOUNT_SIZE::LIGHT) {
             const float verts[10 * 3] = {
                 pos.i+oox, pos.j,           0,
                 pos.i+oox, pos.j-h/15,      0,
@@ -1141,7 +1162,7 @@ static void DrawGun( Vector pos, float w, float h, weapon_info::MOUNT_SIZE sz )
                 pos.i,     pos.j+h/4+ooy*5, 0,
             };
             GFXDraw( GFXLINE, verts, 10 );
-        } else if (sz == weapon_info::MEDIUM) {
+        } else if (sz == MOUNT_SIZE::MEDIUM) {
             const float verts[12 * 3] = {
                 pos.i+oox, pos.j,           0,
                 pos.i+oox, pos.j-h/15,      0,
@@ -1157,7 +1178,7 @@ static void DrawGun( Vector pos, float w, float h, weapon_info::MOUNT_SIZE sz )
                 pos.i-oox, pos.j+h/5+ooy*2, 0,
             };
             GFXDraw( GFXLINE, verts, 12 );
-        } else if (sz == weapon_info::HEAVY) {
+        } else if (sz == MOUNT_SIZE::HEAVY) {
             const float verts[14 * 3] = {
                 pos.i+oox,   pos.j,           0,
                 pos.i+oox,   pos.j-h/15,      0,
@@ -1194,14 +1215,14 @@ static void DrawGun( Vector pos, float w, float h, weapon_info::MOUNT_SIZE sz )
             };
             GFXDraw( GFXLINE, verts, 14 );
         }
-    } else if (sz == weapon_info::SPECIAL || sz == weapon_info::SPECIALMISSILE) {
+    } else if (sz == MOUNT_SIZE::SPECIAL || sz == MOUNT_SIZE::SPECIALMISSILE) {
         GFXPointSize( 4 );
         const float verts[3] = {
             pos.x, pos.y, pos.z
         };
         GFXDraw( GFXPOINT, verts, 1 );
         GFXPointSize( 1 );         //classified...  FIXME
-    } else if (sz < weapon_info::HEAVYMISSILE) {
+    } else if (sz < MOUNT_SIZE::HEAVYMISSILE) {
         const float verts[4 * 3] = {
             pos.i,       pos.j-h/8,       0,
             pos.i,       pos.j+h/8,       0,
@@ -1209,7 +1230,7 @@ static void DrawGun( Vector pos, float w, float h, weapon_info::MOUNT_SIZE sz )
             pos.i-2*oox, pos.j-h/8+2*ooy, 0,
         };
         GFXDraw( GFXLINE, verts, 4 );
-    } else if (sz <= weapon_info::CAPSHIPHEAVYMISSILE) {
+    } else if (sz <= MOUNT_SIZE::CAPSHIPHEAVYMISSILE) {
         const float verts[8 * 3] = {
             pos.i,       pos.j-h/6,       0,
             pos.i,       pos.j+h/6,       0,
@@ -1328,7 +1349,7 @@ void VDU::DrawDamage( Unit *parent )
     do { \
         static string name = vs_config->getVariable( "graphics", "hud", which_key, which_name_default ); \
         if (!name.empty()) { \
-            REPORTITEM( parent->pImage->which##Functionality, parent->pImage->which##FunctionalityMax, \
+            REPORTITEM( parent->which##Functionality, parent->which##FunctionalityMax, \
                 print_percent_working, \
                 name \
             ); \
@@ -1514,7 +1535,7 @@ GFXColor MountColor( Mount *mnt )
             {
                 float tref = mnt->type->Refire();
                 float cref = 0;
-                if ( (mnt->type->type == weapon_info::BEAM) && mnt->ref.gun )
+                if ( (mnt->type->type == WEAPON_TYPE::BEAM) && mnt->ref.gun )
                     cref = mnt->ref.gun->refireTime();
                 else
                     cref = mnt->ref.refire;
@@ -1567,7 +1588,7 @@ void VDU::DrawWeapon( Unit *parent )
     DrawTargetSpr( drawweapsprite ? parent->getHudImage() : NULL, percent, x, y, w, h );
     GFXDisable( TEXTURE0 );
     GFXDisable( LIGHTING );
-    int nummounts = parent->GetNumMounts();
+    int nummounts = parent->getNumMounts();
     int numave    = 1;
     GFXColor average( 0, 0, 0, 0 );
     for (int i = 0; i < nummounts; i++) {
@@ -1595,7 +1616,7 @@ void VDU::DrawWeapon( Unit *parent )
                 if (parent->mounts[i].status == Mount::UNCHOSEN)
                     baseweaponreport += list_empty_mounts_as;
                 else
-                    baseweaponreport += parent->mounts[i].type->weapon_name;
+                    baseweaponreport += parent->mounts[i].type->name;
                 if (numave != 1)    //  show banks, if any, here; "#" seems to be a reserved char, see colToString
                     baseweaponreport += string( " x" )+tostring( numave );
                 if (parent->mounts[i].ammo >= 0)
@@ -1738,9 +1759,6 @@ bool VDU::SetWebcamAnimation()
 void VDU::DrawWebcam( Unit *parent )
 {
     using VSFileSystem::JPEGBuffer;
-    int   length;
-    char *netcam;
-
     tp->Draw( MangleString( "No webcam to view",
                                 _Universe->AccessCamera()->GetNebula() != NULL ? .4 : 0 ), scrolloffset, true );
 

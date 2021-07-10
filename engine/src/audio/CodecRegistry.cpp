@@ -1,3 +1,28 @@
+/**
+ * CodecRegistry.cpp
+ *
+ * Copyright (C) Daniel Horn
+ * Copyright (C) 2020 pyramid3d, Stephen G. Tuggy, and other Vega Strike
+ * contributors
+ *
+ * https://github.com/vegastrike/Vega-Strike-Engine-Source
+ *
+ * This file is part of Vega Strike.
+ *
+ * Vega Strike is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * Vega Strike is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with Vega Strike.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
 //
 // C++ Implementation: Audio::CodecRegistry, Audio::CodecRegistration
 //
@@ -14,43 +39,44 @@ namespace Audio {
     CodecRegistry::CodecRegistry()
     {
     }
-    
+
     CodecRegistry::~CodecRegistry()
     {
         nameCodec.clear();
         universalCodecs.clear();
         extensionCodecs.clear();
-        
+
         for (CodecPriority::const_iterator it = codecPriority.begin(); it != codecPriority.end(); ++it)
             delete it->first;
         codecPriority.clear();
     }
-    
+
     void CodecRegistry::add(Codec* codec, int priority)
     {
         if (codecPriority.find(codec) == codecPriority.end()) {
             codecPriority[codec] = priority;
             nameCodec[codec->getName()] = codec;
-            
-            std::cout << "Registering codec " << codec->getName().c_str();
-            
+
+            // static initializer ordering issue between boost logger and other code?
+            BOOST_LOG_TRIVIAL(trace) << "Registering codec " << codec->getName().c_str();
+
             const Codec::Extensions *ext = codec->getExtensions();
             if (ext) {
                 for (Codec::Extensions::const_iterator it = ext->begin(); it != ext->end(); ++it) {
-                    std::cout << " " << it->c_str();
+                    BOOST_LOG_TRIVIAL(trace) << " " << it->c_str();
                     extensionCodecs[*it].insert(codec);
                 }
             } else {
-                std::cout << " as universal";
+                BOOST_LOG_TRIVIAL(trace) << " as universal";
                 universalCodecs.insert(codec);
             }
-            
-            std::cout << "." << std::endl;
+
+            BOOST_LOG_TRIVIAL(trace) << "." << std::endl;
         } else {
-            std::cout << "Codec " << codec->getName().c_str() << " already registered" << std::endl;
+            BOOST_LOG_TRIVIAL(trace) << "Codec " << codec->getName().c_str() << " already registered" << std::endl;
         }
     }
-    
+
     void CodecRegistry::remove(Codec* codec)
     {
         if (codecPriority.find(codec) != codecPriority.end()) {
@@ -58,14 +84,14 @@ namespace Audio {
             nameCodec.erase(codec->getName());
             const Codec::Extensions *ext = codec->getExtensions();
             if (ext) {
-                for (Codec::Extensions::const_iterator it = ext->begin(); it != ext->end(); ++it) 
+                for (Codec::Extensions::const_iterator it = ext->begin(); it != ext->end(); ++it)
                     extensionCodecs[*it].erase(codec);
             } else {
                 universalCodecs.erase(codec);
             }
         }
     }
-    
+
     Codec* CodecRegistry::findByName(const std::string& name) const
     {
         NameCodec::const_iterator it = nameCodec.find(name);
@@ -74,12 +100,12 @@ namespace Audio {
             throw CodecNotFoundException(
                 std::string("No codec with name \"") + name + "\" has been registered");
     }
-    
+
     template<typename INDEX, typename T>
     class MappedComparator
     {
         const INDEX& _index;
-    public: 
+    public:
         MappedComparator(const INDEX& index) : _index(index) {}
         bool operator()(const T& a, const T& b) const
         {
@@ -96,11 +122,11 @@ namespace Audio {
             }
         }
     };
-    
+
     Codec* CodecRegistry::findByFile(const std::string& path, VSFileSystem::VSFileType type) const
     {
         std::vector<Codec*> candidates;
-        
+
         // NOTE: we'll assume that if they are including the specified extension, they'll return
         //      true if asked if they can handle the file with !canOpen.
         size_t sep = path.find_last_of('.');
@@ -108,19 +134,19 @@ namespace Audio {
             ExtensionCodecs::const_iterator eit = extensionCodecs.find(
                 path.substr(sep+1, std::string::npos));
             if (eit != extensionCodecs.end())
-                for (CodecSet::const_iterator esit=eit->second.begin(); esit != eit->second.end(); ++esit) 
+                for (CodecSet::const_iterator esit=eit->second.begin(); esit != eit->second.end(); ++esit)
                     candidates.push_back(*esit);
         }
-        
+
         for (CodecSet::const_iterator uit = universalCodecs.begin(); uit != universalCodecs.end(); ++uit)
             if ((*uit)->canHandle(path, false, type))
                 candidates.push_back(*uit);
-        
+
         // Now we'll sort candidates by priority, and return the first codec that can actually handle the file.
         if (candidates.begin() != candidates.end()) {
             std::sort(
-                candidates.begin(), 
-                candidates.end(), 
+                candidates.begin(),
+                candidates.end(),
                 MappedComparator<CodecPriority,Codec*>(codecPriority));
 
 			// Why do we need an explicit cast *to* const?
@@ -130,18 +156,18 @@ namespace Audio {
                 if ((*it)->canHandle(path, true, type))
                     return *it;
         }
-    
+
         // No candidate is able to handle this one!
         throw CodecNotFoundException(
             std::string("No registered codec can handle the file \"") + path + "\"");
     }
-    
-    Stream* CodecRegistry::open(const std::string& path, VSFileSystem::VSFileType type) const 
+
+    Stream* CodecRegistry::open(const std::string& path, VSFileSystem::VSFileType type) const
     {
         Codec *codec = findByFile(path, type);
 		return codec->open(path, type);
     }
-    
+
     CodecRegistration::CodecRegistration(Codec* _codec, int priority)
         : codec(_codec)
     {
@@ -149,7 +175,7 @@ namespace Audio {
             new CodecRegistry();
         CodecRegistry::getSingleton()->add(codec);
     }
-    
+
     CodecRegistration::~CodecRegistration()
     {
         CodecRegistry::getSingleton()->remove(codec);

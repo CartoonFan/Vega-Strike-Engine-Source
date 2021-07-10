@@ -1,10 +1,34 @@
+/**
+ * mount.cpp
+ *
+ * Copyright (C) Daniel Horn
+ * Copyright (C) 2020 pyramid3d, Stephen G. Tuggy, and other Vega Strike
+ * contributors
+ *
+ * https://github.com/vegastrike/Vega-Strike-Engine-Source
+ *
+ * This file is part of Vega Strike.
+ *
+ * Vega Strike is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * Vega Strike is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with Vega Strike.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
 #include "unit_generic.h"
-#include "missile_generic.h"
+#include "missile.h"
 #include "beam.h"
 #include "bolt.h"
-#include "weapon_xml.h"
 #include "audiolib.h"
-#include "unit_factory.h"
+#include "missile.h"
 #include "ai/order.h"
 #include "ai/fireall.h"
 #include "ai/script.h"
@@ -16,15 +40,20 @@
 #include "ai/aggressive.h"
 #include "lin_time.h"
 #include "vsfilesystem.h"
+#include "unit.h"
+#include "star_system.h"
+#include "universe.h"
+#include "weapon_info.h"
+
 
 extern char SERVER;
 Mount::Mount()
 {
-    static weapon_info wi( weapon_info::BEAM );
+    static weapon_info wi( WEAPON_TYPE::BEAM );
     functionality    = 1;
     maxfunctionality = 1;
     type = &wi;
-    size = weapon_info::NOWEAP;
+    size = as_integer(MOUNT_SIZE::NOWEAP);
     functionality    = maxfunctionality = 1.0f;
     ammo = -1;
     status    = UNCHOSEN;
@@ -46,10 +75,10 @@ void DestroyMount( Mount *mount )
 }
 float Mount::ComputeAnimatedFrame( Mesh *gun )
 {
-    if (type->type == weapon_info::BEAM) {
+    if (type->type == WEAPON_TYPE::BEAM) {
         if (ref.gun) {
             if ( ref.gun->Ready() )
-                return getNewTime()+type->Refire()-ref.gun->refireTime()-interpolation_blend_factor*SIMULATION_ATOM;
+                return getNewTime()+type->Refire()-ref.gun->refireTime()-interpolation_blend_factor*simulation_atom_var;
             else
                 return getNewTime()*gun->getFramesPerSecond();
         } else {
@@ -59,7 +88,7 @@ float Mount::ComputeAnimatedFrame( Mesh *gun )
         if ( ref.refire < type->Refire() )
             return getNewTime()*gun->getFramesPerSecond();
         else
-            return getNewTime()+type->Refire()-ref.refire-interpolation_blend_factor*SIMULATION_ATOM;
+            return getNewTime()+type->Refire()-ref.refire-interpolation_blend_factor*simulation_atom_var;
     }
 }
 Mount::Mount( const string &filename, int am, int vol, float xyscale, float zscale, float func, float maxfunc,
@@ -68,8 +97,8 @@ Mount::Mount( const string &filename, int am, int vol, float xyscale, float zsca
     //short fix
     functionality    = func;
     maxfunctionality = maxfunc;
-    static weapon_info wi( weapon_info::BEAM );
-    size = weapon_info::NOWEAP;
+    static weapon_info wi( WEAPON_TYPE::BEAM );
+    size = as_integer(MOUNT_SIZE::NOWEAP);
     static float xyscalestat = XMLSupport::parse_float( vs_config->getVariable( "graphics", "weapon_xyscale", "1" ) );
 
     static float zscalestat  = XMLSupport::parse_float( vs_config->getVariable( "graphics", "weapon_zscale", "1" ) );
@@ -86,15 +115,15 @@ Mount::Mount( const string &filename, int am, int vol, float xyscale, float zsca
     ref.gun      = NULL;
     status       = (UNCHOSEN);
     processed    = Mount::PROCESSED;
-    weapon_info *temp = getTemplate( filename );
+    weapon_info *temp = getWeapon( filename );
     if (temp == NULL) {
         status = UNCHOSEN;
         time_to_lock = 0;
     } else {
         type   = temp;
         status = ACTIVE;
-        time_to_lock = temp->LockTime;
-        if (type->type != weapon_info::BEAM)
+        time_to_lock = temp->lock_time;
+        if (type->type != WEAPON_TYPE::BEAM)
             ref.refire = type->Refire();
     }
 }
@@ -108,7 +137,7 @@ void AdjustMatrixToTrackTarget( Matrix &mat, const Vector &velocity, Unit *targe
 void Mount::UnFire()
 {
     processed = UNFIRED;
-    if (status != ACTIVE || ref.gun == NULL || type->type != weapon_info::BEAM)
+    if (status != ACTIVE || ref.gun == NULL || type->type != WEAPON_TYPE::BEAM)
         return;
     ref.gun->Destabilize();
 }
@@ -131,7 +160,7 @@ void Mount::ReplaceMounts( Unit *un, const Mount *other )
     this->zscale  = zscale;
     this->bank    = thisbank;
     ref.gun       = NULL;
-    if (type->type != weapon_info::BEAM)
+    if (type->type != WEAPON_TYPE::BEAM)
         ref.refire = type->Refire();
     this->ReplaceSound();
     if (other->ammo == -1)
@@ -150,29 +179,29 @@ double Mount::Percentage( const Mount *newammo ) const
         if (ammo != -1) {
             thingstocompare++;
         } else {
-            if (newammo->type->Range == type->Range && newammo->type->Damage == type->Damage && newammo->type->PhaseDamage
-                == type->PhaseDamage)
+            if (newammo->type->range == type->range && newammo->type->damage == type->damage && newammo->type->phase_damage
+                == type->phase_damage)
                 return 1;
-            if (newammo->type->weapon_name == type->weapon_name)
+            if (newammo->type->name == type->name)
                 return 1;
         }
     } else if (newammo->ammo > 0) {
         percentage += .25;
         thingstocompare++;
         if (ammo > 0) {
-            if (newammo->type->Range == type->Range && newammo->type->Damage == type->Damage && newammo->type->PhaseDamage
-                == type->PhaseDamage)
+            if (newammo->type->range == type->range && newammo->type->damage == type->damage && newammo->type->phase_damage
+                == type->phase_damage)
                 return 1;
-            if (newammo->type->weapon_name == type->weapon_name)
+            if (newammo->type->name == type->name)
                 return 1;
         }
     }
-    if (newammo->type->Range) {
-        if (type->Range > newammo->type->Range) percentage += .25;
+    if (newammo->type->range) {
+        if (type->range > newammo->type->range) percentage += .25;
         thingstocompare++;
     }
-    if (newammo->type->Damage+100*newammo->type->PhaseDamage) {
-        if (type->Damage+100*type->PhaseDamage > newammo->type->Damage+100*newammo->type->PhaseDamage) percentage += .75;
+    if (newammo->type->damage+100*newammo->type->phase_damage) {
+        if (type->damage+100*type->phase_damage > newammo->type->damage+100*newammo->type->phase_damage) percentage += .75;
         thingstocompare++;
     }
     if (thingstocompare)
@@ -199,12 +228,12 @@ bool Mount::PhysicsAlignedFire( Unit *caller,
     static bool lock_disrupted_by_false_fire =
         XMLSupport::parse_bool( vs_config->getVariable( "physics", "out_of_arc_fire_disrupts_lock", "false" ) );
     if (lock_disrupted_by_false_fire)
-        time_to_lock = type->LockTime;
+        time_to_lock = type->lock_time;
     if (processed == FIRED) {
-        if ( type->type == weapon_info::BEAM || type->isMissile() )
+        if ( type->type == WEAPON_TYPE::BEAM || type->isMissile() )
             //Missiles and beams set to processed.
             processed = PROCESSED;
-        else if (ref.refire < type->Refire() || type->EnergyRate > caller->energy)
+        else if (ref.refire < type->Refire() || type->energy_rate > caller->energy)
             //Wait until refire has expired and reactor has produced enough energy for the next bolt.
             return true;              //Not ready to refire yet.  But don't stop firing.
 
@@ -217,14 +246,14 @@ bool Mount::PhysicsAlignedFire( Unit *caller,
         static bool firemissingautotrackers =
             XMLSupport::parse_bool( vs_config->getVariable( "physics", "fire_missing_autotrackers", "true" ) );
         if (autotrack && NULL != target) {
-            if ( !AdjustMatrix( mat, velocity, target, type->Speed, autotrack >= 2, trackingcone ) )
+            if ( !AdjustMatrix( mat, velocity, target, type->speed, autotrack >= 2, trackingcone ) )
                 if (!firemissingautotrackers)
                     return false;
-        } else if (this->size&weapon_info::AUTOTRACKING) {
+        } else if (this->size & as_integer(MOUNT_SIZE::AUTOTRACKING)) {
             if (!firemissingautotrackers)
                 return false;
         }
-        if (type->type != weapon_info::BEAM) {
+        if (type->type != WEAPON_TYPE::BEAM) {
             ref.refire = 0;
             if (ammo > 0)
                 ammo--;
@@ -233,33 +262,33 @@ bool Mount::PhysicsAlignedFire( Unit *caller,
             if (ammo > 0 && reduce_beam_ammo)
                 ammo--;
         }
-        time_to_lock = type->LockTime;
+        time_to_lock = type->lock_time;
         switch (type->type)
         {
-        case weapon_info::UNKNOWN:
+        case WEAPON_TYPE::UNKNOWN:
             break;
-        case weapon_info::BEAM:
+        case WEAPON_TYPE::BEAM:
             if (ref.gun)
                 ref.gun->Init( Transformation( orient, pos.Cast() ), *type, owner, caller );
             break;
-        case weapon_info::BOLT:
-        case weapon_info::BALL:
-            caller->energy -= type->EnergyRate;
+        case WEAPON_TYPE::BOLT:
+        case WEAPON_TYPE::BALL:
+            caller->energy -= type->energy_rate;
             hint[Unit::UNIT_BOLT] = Bolt( type, mat, velocity, owner, hint[Unit::UNIT_BOLT] ).location;             //FIXME turrets won't work! Velocity
 
             break;
-        case weapon_info::PROJECTILE:
+        case WEAPON_TYPE::PROJECTILE:
             static bool match_speed_with_target =
                 XMLSupport::parse_float( vs_config->getVariable( "physics", "match_speed_with_target", "true" ) );
             string skript   = /*string("ai/script/")+*/ type->file+string( ".xai" );
             VSError     err = LookForFile( skript, AiFile );
             if (err <= Ok) {
-                temp = UnitFactory::createMissile(
-                    type->file.c_str(), caller->faction, "", type->Damage, type->PhaseDamage, type->Range/type->Speed,
-                    type->Radius, type->RadialSpeed, type->PulseSpeed /*detonation_radius*/);
+                temp = new Missile(
+                    type->file.c_str(), caller->faction, "", type->damage, type->phase_damage, type->range/type->speed,
+                    type->radius, type->radial_speed, type->pulse_speed /*detonation_radius*/);
                 if (!match_speed_with_target) {
-                    temp->GetComputerData().max_combat_speed    = type->Speed+velocity.Magnitude();
-                    temp->GetComputerData().max_combat_ab_speed = type->Speed+velocity.Magnitude();
+                    temp->GetComputerData().max_combat_speed    = type->speed+velocity.Magnitude();
+                    temp->GetComputerData().max_combat_ab_speed = type->speed+velocity.Magnitude();
                 }
             } else {
                 Flightgroup *testfg = caller->getFlightgroup();
@@ -288,8 +317,7 @@ bool Mount::PhysicsAlignedFire( Unit *caller,
                         fg->nr_ships      = 1;
                         fg->nr_ships_left = 1;
                     }
-                    temp = UnitFactory::createUnit(
-                        type->file.c_str(), false, caller->faction, "", fg, fgsnumber, nullptr );
+                    temp = new GameUnit (type->file.c_str(), false, caller->faction, "", fg, fgsnumber, nullptr );
                 } else {
                     Flightgroup *fg = caller->getFlightgroup();
                     int fgsnumber   = 0;
@@ -298,11 +326,10 @@ bool Mount::PhysicsAlignedFire( Unit *caller,
                         fg->nr_ships++;
                         fg->nr_ships_left++;
                     }
-                    temp = UnitFactory::createUnit(
-                        type->file.c_str(), false, caller->faction, "", fg, fgsnumber, nullptr);
+                    temp = new GameUnit(type->file.c_str(), false, caller->faction, "", fg, fgsnumber, nullptr);
                 }
             }
-            Vector adder = Vector( mat.r[6], mat.r[7], mat.r[8] )*type->Speed;
+            Vector adder = Vector( mat.r[6], mat.r[7], mat.r[8] )*type->speed;
             temp->SetVelocity( caller->GetVelocity()+adder );
 
 
@@ -386,14 +413,14 @@ bool Mount::PhysicsAlignedFire( Unit *caller,
             }
 
             if ( ( ( (!use_separate_sound)
-                    || type->type == weapon_info::BEAM )
+                    || type->type == WEAPON_TYPE::BEAM )
                   || ( (!ai_use_separate_sound) && !ips ) ) && !type->isMissile() ) {
-                if ( ai_sound || (ips && type->type == weapon_info::BEAM) ) {
+                if ( ai_sound || (ips && type->type == WEAPON_TYPE::BEAM) ) {
                     if ( !AUDIsPlaying( sound ) ) {
                         AUDPlay( sound, sound_pos, sound_vel, sound_gain );
                     } else {
                         if (distancesqr < maxdistancesqr) {
-                            if (type->type == weapon_info::BEAM) {
+                            if (type->type == WEAPON_TYPE::BEAM) {
                                 // Beams don't re-start, they keep playing
                                 AUDAdjustSound( sound, sound_pos, sound_vel );
                                 AUDSoundGain( sound, sound_gain );
@@ -441,7 +468,7 @@ bool Mount::Fire( Unit *firer, void *owner, bool Missile, bool listen_to_owner )
         processed = UNFIRED;
     if (processed == FIRED || status != ACTIVE || ( type->isMissile() != Missile ) || ammo == 0)
         return false;
-    if (type->type == weapon_info::BEAM) {
+    if (type->type == WEAPON_TYPE::BEAM) {
         bool fireit = ref.gun == NULL;
         if (!fireit)
             fireit = ref.gun->Ready();
@@ -474,3 +501,30 @@ void Mount::ReplaceSound()
 {
     sound = AUDCreateSound( sound, false );     //copy constructor basically
 }
+
+void Mount::Activate( bool Missile )
+{
+    if ( type->isMissile() == Missile )
+        if (status == INACTIVE)
+            status = ACTIVE;
+}
+
+///Sets this gun to inactive, unless unchosen or destroyed
+void Mount::DeActive( bool Missile )
+{
+    if ( type->isMissile() == Missile )
+        if (status == ACTIVE)
+            status = INACTIVE;
+}
+
+void Mount::SetMountPosition( const Vector &v )
+{
+    pos = v;
+}
+
+void Mount::SetMountOrientation( const Quaternion &t )
+{
+    orient = t;
+}
+
+

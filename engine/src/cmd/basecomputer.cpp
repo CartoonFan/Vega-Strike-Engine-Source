@@ -1,24 +1,30 @@
 // -*- mode: c++; c-basic-offset: 4; indent-tabs-mode: nil -*-
-/*
- * Vega Strike
+
+/**
+ * basecomputer.cpp
+ *
  * Copyright (C) 2003 Mike Byron
+ * Copyright (C) 2019-2020 Stephen G. Tuggy, pyramid3d, and other Vega Strike
+ * contributors
  *
- * http://vegastrike.sourceforge.net/
+ * https://github.com/vegastrike/Vega-Strike-Engine-Source
  *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
+ * This file is part of Vega Strike.
  *
- * This program is distributed in the hope that it will be useful,
+ * Vega Strike is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * Vega Strike is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+ * along with Vega Strike.  If not, see <https://www.gnu.org/licenses/>.
  */
+
 
 #include "vegastrike.h"
 #if defined (_WIN32) && !defined (__CYGWIN__) && !defined (__MINGW32__)
@@ -33,11 +39,11 @@ using VSFileSystem::SaveFile;
 #include <algorithm>                //For std::sort.
 #include <set>
 #include "load_mission.h"
-#include "cmd/planet_generic.h"
+#include "cmd/planet.h"
 #include "cmd/unit_util.h"
 #include "cmd/music.h"
 #include "cmd/unit_const_cache.h"
-#include "cmd/unit_factory.h"
+#include "unit.h"
 #include "gui/modaldialog.h"
 #include "main_loop.h"              //For QuitNow().
 #include "lin_time.h"
@@ -54,6 +60,11 @@ using VSFileSystem::SaveFile;
 #include "gamemenu.h" //network menu.
 #include "audiolib.h"
 #include "vs_math.h"
+#include "damageable.h"
+#include "universe.h"
+#include "mount_size.h"
+#include "weapon_info.h"
+
 //#define VS_PI 3.1415926535897931
 
 
@@ -83,7 +94,6 @@ using namespace XMLSupport;
 
 //end for directory thing
 extern const char *DamagedCategory;
-
 
 int BaseComputer:: dirty = 0;
 
@@ -394,7 +404,7 @@ extern float RepairPrice( float operational, float price );
 
 static float basicRepairPrice( void )
 {
-    static const float price = XMLSupport::parse_float( vs_config->getVariable( "physics", "repair_price", "5000" ) );
+    static float price = XMLSupport::parse_float( vs_config->getVariable( "physics", "repair_price", "5000" ) );
     return price*g_game.difficulty;
 }
 
@@ -1542,7 +1552,7 @@ void BaseComputer::recalcTitle()
     Unit  *baseUnit  = m_base.GetUnit();
     string baseName;
     if (baseUnit) {
-        if (baseUnit->isUnit() == PLANETPTR) {
+        if (baseUnit->isUnit() == _UnitType::planet) {
             string temp = ( (Planet*) baseUnit )->getHumanReadablePlanetType()+" Planet";
             // think "<planet type> <name of planet>"
             baseName = temp + " " + baseUnit->name;
@@ -1570,31 +1580,37 @@ void BaseComputer::recalcTitle()
     baseTitleDisplay->setText( baseTitle );
 
     //Generic player title for display
-    char playerTitle[256];
-    playerTitle[0] = '\0';              //Start with an empty string.
+    std::string playerTitle = "";
 
     static bool showStardate =
         XMLSupport::parse_bool( vs_config->getVariable( "graphics", "show_stardate", "true" ) );
 
     //Credits the player has.
     const float playerCredits = _Universe->AccessCockpit()->credits;
-    const char *stardate = _Universe->current_stardate.GetFullTrekDate().c_str();
+    const std::string stardateString = _Universe->current_stardate.GetFullTrekDate();
+    const char *stardate = stardateString.c_str();
     switch (m_currentDisplay)
     {
     default:
         if (showStardate) {
-            sprintf( playerTitle, "Stardate: %s      Credits: %.2f", stardate, playerCredits );
+            playerTitle = (boost::format("Stardate: %1$s      Credits: %2$.2f")
+                                         % stardate % playerCredits)
+                                         .str();
         } else {
-            sprintf( playerTitle, "Credits: %.2f", playerCredits );
+            playerTitle = (boost::format("Credits: %1$.2f") % playerCredits).str();
         }
         break;
     case MISSIONS:
         {
             const int count = guiMax( 0, int(active_missions.size())-1 );
             if (showStardate) {
-                sprintf( playerTitle, "Stardate: %s      Credits: %.2f      Active missions: %d", stardate, playerCredits, count );
+                playerTitle = (boost::format("Stardate: %1$s      Credits: %2$.2f      Active missions: %3$d")
+                                             % stardate % playerCredits % count)
+                                             .str();
             } else {
-                sprintf( playerTitle, "Credits: %.2f      Active missions: %d", playerCredits, count );
+                playerTitle = (boost::format("Credits: %1$.2f      Active missions: %2$d")
+                                             % playerCredits % count)
+                                             .str();
             }
             break;
         }
@@ -1613,11 +1629,24 @@ void BaseComputer::recalcTitle()
                 const float basemass = atof( UniverseUtil::LookupUnitStat( playerUnit->name, "", "Mass" ).c_str() );
                 float massEffect = 0.0;
                 if (basemass > 0)
-                    massEffect = 100 * playerUnit->Mass / basemass;
+                    massEffect = 100 * playerUnit->getMass() / basemass;
                 if (showStardate) {
-                    sprintf( playerTitle, "Stardate: %s      Credits: %.2f      Space left: %.6g of %.6g cubic meters   Mass: %.0f%% (base)", stardate, playerCredits, volumeLeft, emptyVolume, massEffect );
+                    playerTitle = (boost::format("Stardate: %1$s      Credits: %2$.2f      "
+                                    "Space left: %3$.6g of %4$.6g cubic meters   Mass: %5$.0f%% (base)")
+                                                % stardate
+                                                % playerCredits
+                                                % volumeLeft
+                                                % emptyVolume
+                                                % massEffect)
+                                                .str();
                 } else {
-                    sprintf( playerTitle, "Credits: %.2f      Space left: %.6g of %.6g cubic meters   Mass: %.0f%% (base)", playerCredits, volumeLeft, emptyVolume, massEffect);
+                    playerTitle = (boost::format("Credits: %1$.2f      "
+                                    "Space left: %2$.6g of %3$.6g cubic meters   Mass: %4$.0f%% (base)")
+                                    % playerCredits
+                                    % volumeLeft
+                                    % emptyVolume
+                                    % massEffect)
+                                    .str();
                 }
             }
             break;
@@ -1760,8 +1789,7 @@ void BaseComputer::configureCargoCommitControls( const Cargo &item, TransactionT
 
         //Total price display.
         const double   totalPrice   = item.price*maxQuantity;
-        char tempString[2048];
-        sprintf( tempString, "Total: #b#%.2f#-b", totalPrice );
+        std::string tempString = (boost::format("Total: #b#%1$.2f#-b") % totalPrice).str();
         StaticDisplay *totalDisplay = static_cast< StaticDisplay* > ( window()->findControlById( "TotalPrice" ) );
         assert( totalDisplay != NULL );
         totalDisplay->setText( tempString );
@@ -1773,8 +1801,7 @@ void BaseComputer::configureCargoCommitControls( const Cargo &item, TransactionT
             //No limits, so let's not mention anything.
             maxForPlayer->setText( "" );
         } else {
-            char maxString[2048];
-            sprintf( maxString, "Max: #b#%d#-b", maxQuantity );
+            std::string maxString = (boost::format("Max: #b#%1$d#-b") % maxQuantity).str();
             maxForPlayer->setText( maxString );
         }
     } else {
@@ -1803,8 +1830,7 @@ void BaseComputer::configureCargoCommitControls( const Cargo &item, TransactionT
 
         //Total price display.
         const double   totalPrice   = item.price*item.quantity*(item.mission ? 0 : 1);
-        char tempString[2048];
-        sprintf( tempString, "Total: #b#%.2f#-b", totalPrice );
+        std::string tempString = (boost::format("Total: #b#%1$.2f#-b") % totalPrice).str();
         StaticDisplay *totalDisplay = static_cast< StaticDisplay* > ( window()->findControlById( "TotalPrice" ) );
         assert( totalDisplay != NULL );
         totalDisplay->setText( tempString );
@@ -1981,7 +2007,7 @@ void BaseComputer::updateTransactionControlsForSelection( TransactionList *tlist
     string text = "";
     string descString;
     string tailString;
-    char   tempString[2048];
+    string tempString = "";
     Unit  *baseUnit = m_base.GetUnit();
     if (tlist->transaction != ACCEPT_MISSION) {
         //Do the money.
@@ -1998,11 +2024,13 @@ void BaseComputer::updateTransactionControlsForSelection( TransactionList *tlist
             if (item.GetCategory().find( "My_Fleet" ) != string::npos) {
                 //This ship is in my fleet -- the price is just the transport cost to get it to
                 //the current base.  "Buying" this ship makes it my current ship.
-                sprintf( tempString, "#b#Transport cost: %.2f#-b#n1.5#", item.price );
+                tempString = (boost::format("#b#Transport cost: %$1.2f#-b#n1.5#") % item.price).str();
             } else {
-                sprintf( tempString, "Price: #b#%.2f#-b#n#", baseUnit->PriceCargo( item.content ) );
+                tempString = (boost::format("Price: #b#%1$.2f#-b#n#")
+                                % baseUnit->PriceCargo(item.content)).str();
                 descString += tempString;
-                sprintf( tempString, "Cargo volume: %.2f cubic meters;  Mass: %.2f metric tons#n1.5#", item.volume, item.mass );
+                tempString = (boost::format("Cargo volume: %1$.2f cubic meters;  "
+                                "Mass: %2$.2f metric tons#n1.5#") % item.volume % item.mass).str();
             }
             descString += tempString;
             tailString = buildCargoDescription( item, *this, item.price );
@@ -2015,9 +2043,12 @@ void BaseComputer::updateTransactionControlsForSelection( TransactionList *tlist
                 int   multiplier = 1;
                 if (playerUnit)
                     multiplier = playerUnit->RepairCost();
-                sprintf( tempString, "Price: #b#%.2f#-b#n1.5#", basicRepairPrice()*multiplier );
+                tempString = (boost::format("Price: #b#%1$.2f#-b#n1.5#")
+                                % (basicRepairPrice()*multiplier))
+                                .str();
             } else {
-                sprintf( tempString, "Price: #b#%.2f#-b#n1.5#", baseUnit->PriceCargo( item.content ) );
+                tempString = (boost::format("Price: #b#%1$.2f#-b#n1.5#") % baseUnit->PriceCargo(item.content))
+                                .str();
             }
             descString += tempString;
             if (item.GetDescription() == "" || item.GetDescription()[0] != '#')
@@ -2038,15 +2069,16 @@ void BaseComputer::updateTransactionControlsForSelection( TransactionList *tlist
             if (item.GetCategory().find( "My_Fleet" ) != string::npos) {
                 //This ship is in my fleet -- the price is just the transport cost to get it to
                 //the current base.  "Buying" this ship makes it my current ship.
-                sprintf( tempString, "#b#Transport cost: %.2f#-b#n1.5#", item.price );
+                tempString = (boost::format("#b#Transport cost: %1$.2f#-b#n1.5#") % item.price).str();
             } else {
                 PRETTY_ADDN("", baseUnit->PriceCargo(item.content), 2);
-                sprintf( tempString, "Price: #b#%s#-b#n#", text.c_str() );
+                tempString = (boost::format("Price: #b#%1%#-b#n#") % text).str();
                 static bool printvolume =
                     XMLSupport::parse_bool( vs_config->getVariable( "graphics", "base_print_cargo_volume", "true" ) );
                 if (printvolume) {
                     descString += tempString;
-                    sprintf( tempString, "Vessel volume: %.2f cubic meters;  Mass: %.2f metric tons#n1.5#", item.volume, item.mass );
+                    tempString = (boost::format("Vessel volume: %1$.2f cubic meters;  "
+                                    "Mass: %2$.2f metric tons#n1.5#") % item.volume % item.mass).str();
                 }
             }
             descString += tempString;
@@ -2060,12 +2092,15 @@ void BaseComputer::updateTransactionControlsForSelection( TransactionList *tlist
                 item.description = temp;
             }
             if (item.mission)
-                sprintf( tempString, "Destroy evidence of mission cargo. Credit received: 0.00." );
+                tempString = "Destroy evidence of mission cargo. Credit received: 0.00.";
             else
-                sprintf( tempString, "Value: #b#%.2f#-b, purchased for %.2f#n#",
-                         baseUnit->PriceCargo( item.content ), item.price );
+                tempString = (boost::format("Value: #b#%1$.2f#-b, purchased for %2$.2f#n#")
+                         % baseUnit->PriceCargo(item.content)
+                         % item.price)
+                         .str();
             descString += tempString;
-            sprintf( tempString, "Cargo volume: %.2f cubic meters;  Mass: %.2f metric tons#n1.5#", item.volume, item.mass );
+            tempString = (boost::format("Cargo volume: %1$.2f cubic meters;  Mass: %2$.2f metric tons#n1.5#")
+                            % item.volume % item.mass).str();
             descString += tempString;
             if (!item.mission)
                 tailString = buildCargoDescription( item, *this, baseUnit->PriceCargo( item.content ) );
@@ -2078,21 +2113,27 @@ void BaseComputer::updateTransactionControlsForSelection( TransactionList *tlist
                     m_player.GetUnit(), item.content, item.category, false ) : 0.0;
                 if (percent_working < 1) {
                     //IF DAMAGED
-                    sprintf( tempString, "Damaged and Used value: #b#%.2f#-b, purchased for %.2f#n1.5#",
-                             SellPrice( percent_working, baseUnit->PriceCargo( item.content ) ), item.price );
+                    tempString = (boost::format("Damaged and Used value: #b#%1$.2f#-b, purchased for %2$.2f#n1.5#")
+                             % SellPrice(percent_working, baseUnit->PriceCargo(item.content))
+                             % item.price)
+                             .str();
                     descString += tempString;
 
-                    sprintf( tempString, "Percent Working: #b#%.2f#-b, Repair Cost: %.2f#n1.5#",
-                            percent_working*100, RepairPrice( percent_working, baseUnit->PriceCargo( item.content ) ) );
+                    tempString = (boost::format("Percent Working: #b#%1$.2f#-b, Repair Cost: %2$.2f#n1.5#")
+                            % (percent_working*100)
+                            % RepairPrice(percent_working, baseUnit->PriceCargo(item.content)))
+                            .str();
                     descString += tempString;
                 } else {
-                    sprintf( tempString, "Used value: #b#%.2f#-b, purchased for %.2f#n1.5#",
-                             usedValue( baseUnit->PriceCargo( item.content ) ), item.price );
+                    tempString = (boost::format("Used value: #b#%1$.2f#-b, purchased for %2$.2f#n1.5#")
+                             % usedValue(baseUnit->PriceCargo(item.content)) % item.price).str();
                     descString += tempString;
                 }
                 if (damaged_mode)
                     descString +=
-                        "#c1:0:0#Warning: #b#Because pieces of your ship are damaged, you will not be able to sell this item until you fix those damaged items in this column in order to allow the mechanics to remove this item.#-c#-b#n1.5#";
+                        "#c1:0:0#Warning: #b#Because pieces of your ship are damaged, you will not be able to "
+                        "sell this item until you fix those damaged items in this column in order to allow the "
+                        "mechanics to remove this item.#-c#-b#n1.5#";
                 //********************************************************************************************
                 if (item.GetDescription() == "" || item.GetDescription()[0] != '#')
                     item.description = buildUpgradeDescription( item );
@@ -2676,10 +2717,10 @@ bool BaseComputer::sellSelectedCargo( int requestedQuantity )
         Cargo     sold;
         const int quantity = (requestedQuantity <= 0 ? item->quantity : requestedQuantity);
         if (item->mission) {
-            vector< Cargo >::iterator mycargo = std::find( playerUnit->pImage->cargo.begin(),
-                                                           playerUnit->pImage->cargo.end(), *item );
-            if ( mycargo != playerUnit->pImage->cargo.end() )
-                playerUnit->RemoveCargo( mycargo-playerUnit->pImage->cargo.begin(), quantity, true );
+            vector< Cargo >::iterator mycargo = std::find( playerUnit->cargo.begin(),
+                                                           playerUnit->cargo.end(), *item );
+            if ( mycargo != playerUnit->cargo.end() )
+                playerUnit->RemoveCargo( mycargo-playerUnit->cargo.begin(), quantity, true );
         } else {
             playerUnit->SellCargo( item->content, quantity, _Universe->AccessCockpit()->credits, sold, baseUnit );
         }
@@ -2774,7 +2815,7 @@ void BaseComputer::loadNewsControls( void )
     picker->clear();
 
     //Load the picker.
-    static const bool newsFromCargolist =
+    static bool newsFromCargolist =
         XMLSupport::parse_bool( vs_config->getVariable( "cargo", "news_from_cargolist", "false" ) );
     if (newsFromCargolist ) {
         gameMessage last;
@@ -2889,7 +2930,7 @@ void BaseComputer::loadMissionsMasterList( TransactionList &tlist )
     Unit *unit = _Universe->AccessCockpit()->GetParent();
     int   playerNum = UnitUtil::isPlayerStarship( unit );
     if (playerNum < 0) {
-        VSFileSystem::vs_fprintf( stderr, "Docked ship not a player." );
+        BOOST_LOG_TRIVIAL(error) << "Docked ship not a player.";
         return;
     }
     //Number of strings to look at.  And make sure they match!
@@ -3108,7 +3149,7 @@ void BaseComputer::loadSellUpgradeControls( void )
     loadMasterList( partListUnit, weapfiltervec, std::vector< std::string > (), false, tlist );
     ClearDowngradeMap();
     playerUnit->FilterDowngradeList( tlist.masterList );
-    static const bool clearDowngrades =
+    static bool clearDowngrades =
         XMLSupport::parse_bool( vs_config->getVariable( "physics", "only_show_best_downgrade", "true" ) );
     if (clearDowngrades) {
         std::set< std::string >downgradeMap = GetListOfDowngrades();
@@ -3414,7 +3455,7 @@ bool UpgradeOperationMountDialog::processWindowCommand( const EventCommandId &co
 //Select the mount to use for selling.
 void BaseComputer::BuyUpgradeOperation::selectMount( void )
 {
-    if (m_newPart->GetNumMounts() <= 0) {
+    if (m_newPart->getNumMounts() <= 0) {
         //Part doesn't need a mount point.
         gotSelectedMount( 0 );
         return;
@@ -3432,7 +3473,7 @@ void BaseComputer::BuyUpgradeOperation::selectMount( void )
     //Fill the dialog picker with the mount points.
     SimplePicker *picker = static_cast< SimplePicker* > ( dialog->window()->findControlById( "Picker" ) );
     assert( picker != NULL );
-    for (int i = 0; i < playerUnit->GetNumMounts(); i++) {
+    for (int i = 0; i < playerUnit->getNumMounts(); i++) {
         //Mount is selectable if we can upgrade with the new part using that mount.
         double     percent;             //Temp.  Not used.
         const bool selectable = playerUnit->canUpgrade( m_newPart,
@@ -3448,13 +3489,13 @@ void BaseComputer::BuyUpgradeOperation::selectMount( void )
         string   mountName;
         string   ammoexp;
         if (playerUnit->mounts[i].status == Mount::ACTIVE || playerUnit->mounts[i].status == Mount::INACTIVE) {
-            mountName  = tostring( i+1 )+" "+playerUnit->mounts[i].type->weapon_name;
+            mountName  = tostring( i+1 )+" "+playerUnit->mounts[i].type->name;
             ammoexp    =
                 (playerUnit->mounts[i].ammo == -1) ? string( "" ) : string( ( " ammo: "+tostring( playerUnit->mounts[i].ammo ) ) );
             mountName += ammoexp;
             mountColor = MOUNT_POINT_FULL();
         } else {
-            const std::string temp = lookupMountSize( playerUnit->mounts[i].size );
+            const std::string temp = getMountSizeString( playerUnit->mounts[i].size );
             mountName  = tostring( i+1 )+" (Empty) "+temp.c_str();
             mountColor = MOUNT_POINT_EMPTY();
         }
@@ -3607,7 +3648,7 @@ static bool matchCargoToWeapon( const std::string &cargoName, const std::string 
 //Select the mount to use for selling.
 void BaseComputer::SellUpgradeOperation::selectMount( void )
 {
-    if (m_newPart->GetNumMounts() <= 0) {
+    if (m_newPart->getNumMounts() <= 0) {
         //Part doesn't need a mount point.
         gotSelectedMount( 0 );
         return;
@@ -3627,7 +3668,7 @@ void BaseComputer::SellUpgradeOperation::selectMount( void )
     assert( picker != NULL );
     int mount = -1;                     //The mount if there was only one.
     int selectableCount  = 0;
-    for (int i = 0; i < playerUnit->GetNumMounts(); i++) {
+    for (int i = 0; i < playerUnit->getNumMounts(); i++) {
         //Whether or not the entry is selectable -- the same as the thing we are selling.
         bool   selectable = false;
 
@@ -3635,7 +3676,7 @@ void BaseComputer::SellUpgradeOperation::selectMount( void )
         string mountName;
         if (playerUnit->mounts[i].status == Mount::ACTIVE || playerUnit->mounts[i].status == Mount::INACTIVE) {
             //Something is mounted here.
-            const std::string unitName = playerUnit->mounts[i].type->weapon_name;
+            const std::string unitName = playerUnit->mounts[i].type->name;
             const Unit *partUnit = UnitConstCache::getCachedConst( StringIntKey( m_part.content, FactionUtil::GetUpgradeFaction() ) );
             string ammoexp;
             mountName  = tostring( i+1 )+" "+unitName.c_str();
@@ -3643,7 +3684,7 @@ void BaseComputer::SellUpgradeOperation::selectMount( void )
                 (playerUnit->mounts[i].ammo == -1) ? string( "" ) : string( ( " ammo: "+tostring( playerUnit->mounts[i].ammo ) ) );
             mountName += ammoexp;
             if (partUnit) {
-                if ( partUnit->GetNumMounts() ) {
+                if ( partUnit->getNumMounts() ) {
                     if (partUnit->mounts[0].type == playerUnit->mounts[i].type) {
                         selectable = true;
                         selectableCount++;
@@ -3657,7 +3698,7 @@ void BaseComputer::SellUpgradeOperation::selectMount( void )
             }
         } else {
             //Nothing at this mount point.
-            const std::string temp = lookupMountSize( playerUnit->mounts[i].size );
+            const std::string temp = getMountSizeString( playerUnit->mounts[i].size );
             mountName = tostring( i+1 )+" (Empty) "+temp.c_str();
         }
         //Now we add the cell.  Note that "selectable" is stored in the tag property.
@@ -3830,11 +3871,11 @@ Cargo CreateCargoForOwnerStarship( const Cockpit *cockpit, const Unit *base, int
     bool needsJumpTransport = (locationSystemName != destinationSystemName);
     bool needsInsysTransport = (locationBaseName != destinationBaseName);
 
-    static const float shipping_price_base =
+    static float shipping_price_base =
         XMLSupport::parse_float( vs_config->getVariable( "physics", "shipping_price_base", "0" ) );
-    static const float shipping_price_insys =
+    static float shipping_price_insys =
         XMLSupport::parse_float( vs_config->getVariable( "physics", "shipping_price_insys", "1000" ) );
-    static const float shipping_price_perjump =
+    static float shipping_price_perjump =
         XMLSupport::parse_float( vs_config->getVariable( "physics", "shipping_price_perjump", "25000" ) );
 
     cargo.price = shipping_price_base;
@@ -3849,17 +3890,10 @@ Cargo CreateCargoForOwnerStarship( const Cockpit *cockpit, const Unit *base, int
             jumps);
         BOOST_LOG_TRIVIAL(trace) << boost::format("Player ship needs transport from %1% to %2% across %3% systems") % locationBaseName %
                                        destinationSystemName % jumps.size();
-        // VSFileSystem::vs_dprintf(3, "Player ship needs transport from %s to %s across %d systems",
-        //     locationBaseName.c_str(),
-        //     destinationSystemName.c_str(),
-        //     jumps.size());
         cargo.price += shipping_price_perjump * (jumps.size() - 1);
     } else if (needsInsysTransport) {
         BOOST_LOG_TRIVIAL(trace) << boost::format("Player ship needs insys transport from %1% to %2%") % locationBaseName %
                                        destinationBaseName;
-        // VSFileSystem::vs_dprintf(3, "Player ship needs insys transport from %s to %s",
-        //     locationBaseName.c_str(),
-        //     destinationBaseName.c_str());
         cargo.price += shipping_price_insys;
     }
 
@@ -3903,6 +3937,7 @@ void SwapInNewShipName( Cockpit *cockpit, Unit *base, const std::string &newFile
 
 string buildShipDescription( Cargo &item, std::string &texturedescription )
 {
+    BOOST_LOG_TRIVIAL(debug) << "Entering buildShipDescription";
     //load the Unit
     string newModifications;
     if (item.GetCategory().find( "My_Fleet" ) != string::npos)
@@ -3911,8 +3946,9 @@ string buildShipDescription( Cargo &item, std::string &texturedescription )
     Flightgroup *flightGroup = new Flightgroup();
     int    fgsNumber = 0;
     current_unit_load_mode = NO_MESH;
-    Unit  *newPart   = UnitFactory::createUnit( item.GetContent().c_str(), false, 0, newModifications,
-                                                flightGroup, fgsNumber );
+
+    BOOST_LOG_TRIVIAL(debug) << "buildShipDescription: creating newPart";
+    Unit  *newPart   = new GameUnit( item.GetContent().c_str(), false, 0, newModifications, flightGroup, fgsNumber );
     current_unit_load_mode = DEFAULT;
     string sHudImage;
     string sImage;
@@ -3932,9 +3968,16 @@ string buildShipDescription( Cargo &item, std::string &texturedescription )
     }
     std::string str;
     showUnitStats( newPart, str, 0, 0, item );
-    delete newPart;
+    BOOST_LOG_TRIVIAL(debug) << "buildShipDescription: killing newPart";
+    newPart->Kill();
+    // BOOST_LOG_TRIVIAL(debug) << "buildShipDescription: deleting newPart";
+    // delete newPart;
+    // newPart = nullptr;
     if ( texturedescription != "" && ( string::npos == str.find( '@' ) ) )
         str = "@"+texturedescription+"@"+str;
+    BOOST_LOG_TRIVIAL(debug) << boost::format("buildShipDescription: texturedescription == %1%") % texturedescription;
+    BOOST_LOG_TRIVIAL(debug) << boost::format("buildShipDescription: return value       == %1%") % str;
+    BOOST_LOG_TRIVIAL(debug) << "Leaving buildShipDescription";
     return str;
 }
 
@@ -3946,13 +3989,14 @@ string buildUpgradeDescription( Cargo &item )
     Flightgroup *flightGroup = new Flightgroup();     //sigh
     int    fgsNumber = 0;
     current_unit_load_mode = NO_MESH;
-    Unit  *newPart   = UnitFactory::createUnit( item.GetContent().c_str(), false,
+    Unit  *newPart   = new GameUnit( item.GetContent().c_str(), false,
                                                 FactionUtil::GetUpgradeFaction(), blnk, flightGroup, fgsNumber );
     current_unit_load_mode = DEFAULT;
     string str = "";
     str += item.description;
     showUnitStats( newPart, str, 0, 1, item );
-    delete newPart;
+    newPart->Kill();
+    // delete newPart;
     return str;
 }
 
@@ -3984,9 +4028,6 @@ void trackPrice(int whichplayer, const Cargo &item, float price, const string &s
 
     BOOST_LOG_TRIVIAL(info) << boost::format("Ranking item %1%/%2% at %3%/%4%") % item.category.get() % item.content.get() % systemName %
                                   baseName;
-    // VSFileSystem::vs_dprintf(1, "Ranking item %s/%s at %s/%s\n",
-    //     item.category.get().c_str(), item.content.get().c_str(),
-    //     systemName.c_str(), baseName.c_str());
 
     // Recorded prices are always sorted, so we first do a quick check to avoid
     // triggering savegame serialization without reason
@@ -4113,43 +4154,36 @@ void trackPrice(int whichplayer, const Cargo &item, float price, const string &s
 
         BOOST_LOG_TRIVIAL(info) << "Tracking data:";
         BOOST_LOG_TRIVIAL(info) << boost::format("  highest locs: (%1%)") % recordedHighestLocs.size();
-        // VSFileSystem::vs_dprintf(1,"Tracking data:\n");
-        // VSFileSystem::vs_dprintf(1,"  highest locs: (%d)\n", recordedHighestLocs.size());
         {
             for (size_t i = 0; i < recordedHighestLocs.size(); ++i) {
                 BOOST_LOG_TRIVIAL(info) << boost::format("    %1% : %2%") % i % recordedHighestLocs[i];
-                // VSFileSystem::vs_dprintf(1, "    %d : %s\n", i, recordedHighestLocs[i].c_str());
             }
         }
 
-        //BOOST_LOG_TRIVIAL(info) << boost::format("  highest prices: (%1%)") % recordedHighestPrices.size();
-        VSFileSystem::vs_dprintf(1,"  highest prices: (%d)\n", recordedHighestPrices.size());
+        BOOST_LOG_TRIVIAL(info) << boost::format("  highest prices: (%1%)") % recordedHighestPrices.size();
         {
             for (size_t i = 0; i < recordedHighestPrices.size(); ++i) {
-                BOOST_LOG_TRIVIAL(info) << boost::format("    %1% : %2$.2f") % i % recordedHighestPrices[i];
-                // VSFileSystem::vs_dprintf(1, "    %d : %.2f\n", i, recordedHighestPrices[i]);
+                                                                    // POSIX-printf style
+                BOOST_LOG_TRIVIAL(info) << boost::format("    %1$d : %2$.2f") % i % recordedHighestPrices[i];
             }
         }
 
-        //BOOST_LOG_TRIVIAL(info) << boost::format("  lowest locs: (%1%)") % recordedLowestLocs.size();
-        VSFileSystem::vs_dprintf(1,"  lowest locs: (%d)\n", recordedLowestLocs.size());
+        BOOST_LOG_TRIVIAL(info) << boost::format("  lowest locs: (%1%)") % recordedLowestLocs.size();
         {
             for (size_t i = 0; i < recordedLowestLocs.size(); ++i) {
                 BOOST_LOG_TRIVIAL(info) << boost::format("    %1% : %2%") % i % recordedLowestLocs[i];
-                // VSFileSystem::vs_dprintf(1, "    %d : %s\n", i, recordedLowestLocs[i].c_str());
             }
         }
 
-        //BOOST_LOG_TRIVIAL(info) << boost::format("  lowest prices: (%1%)") % recordedLowestPrices.size();
-        VSFileSystem::vs_dprintf(1,"  lowest prices: (%d)\n", recordedLowestPrices.size());
+        BOOST_LOG_TRIVIAL(info) << boost::format("  lowest prices: (%1%)") % recordedLowestPrices.size();
         {
             for (size_t i = 0; i < recordedLowestPrices.size(); ++i) {
-                BOOST_LOG_TRIVIAL(info) << boost::format("    %1% : %2$.2f") % i % recordedLowestPrices[i];
-                // VSFileSystem::vs_dprintf(1, "    %d : %.2f\n", i, recordedLowestPrices[i]);
+                                                                    // POSIX-printf style
+                BOOST_LOG_TRIVIAL(info) << boost::format("    %1$d : %2$.2f") % i % recordedLowestPrices[i];
             }
         }
 
-        fflush(stderr);
+        VSFileSystem::flushLogs();
 
         highest.clear();
         highest.resize(recordedHighestPrices.size());
@@ -4160,7 +4194,6 @@ void trackPrice(int whichplayer, const Cargo &item, float price, const string &s
                 text += " (at " + recordedHighestLocs[i] + ")";
 
                 BOOST_LOG_TRIVIAL(info) << boost::format("Highest item %1%") % text;
-                // VSFileSystem::vs_dprintf(1, "Highest item %s\n", text.c_str());
             }
         }
 
@@ -4173,7 +4206,6 @@ void trackPrice(int whichplayer, const Cargo &item, float price, const string &s
                 text += " (at " + recordedLowestLocs[i] + ")";
 
                 BOOST_LOG_TRIVIAL(info) << boost::format("Lowest item %1%") % text;
-                // VSFileSystem::vs_dprintf(1, "Lowest item %s\n", text.c_str());
             }
         }
     }
@@ -4190,7 +4222,7 @@ string buildCargoDescription( const Cargo &item, BaseComputer &computer, float p
         int cp = _Universe->whichPlayerStarship( computer.m_player.GetUnit() );
         vector<string> highest, lowest;
 
-        const string &baseName = (computer.m_base.GetUnit()->isUnit() == PLANETPTR) ?
+        const string &baseName = (computer.m_base.GetUnit()->isUnit() == _UnitType::planet) ?
               computer.m_base.GetUnit()->name.get()
             : computer.m_base.GetUnit()->getFullname();
 
@@ -4257,7 +4289,7 @@ bool sellShip( Unit *baseUnit, Unit *playerUnit, std::string shipname, BaseCompu
 
                 float xtra = 0;
                 if ( cockpit->GetUnitSystemName(i) == _Universe->activeStarSystem()->getFileName() ) {
-                    static const float shipping_price =
+                    static float shipping_price =
                         XMLSupport::parse_float( vs_config->getVariable( "physics", "sellback_shipping_price", "6000" ) );
                     xtra += shipping_price;
                 }
@@ -4341,7 +4373,7 @@ bool buyShip( Unit *baseUnit,
                                                                                                                         0 ),
                                     Vector( 0, 0, 0 ) );
             Unit *newPart =
-                UnitFactory::createUnit( content.c_str(),
+                new GameUnit( content.c_str(),
                                          false,
                                          baseUnit->faction,
                                          newModifications,
@@ -4458,9 +4490,6 @@ static std::string factionColorTextString( int faction )
 {
     //The following gets the spark (faction) color.
     const float *spark = FactionUtil::GetSparkColor( faction );
-
-    //This line puts the faction colors on the std out.
-    //printf("%2d. r=%g g=%g b=%g\n", faction, spark[0], spark[1], spark[2]);
 
     //Brighten up the raw colors by multiplying each channel by 2/3, then adding back 1/3.
     //The darker colors are too hard to read.
@@ -4602,7 +4631,6 @@ void prettyPrintFloat( char *buffer, float f, int digitsBefore, int digitsAfter,
     }
     if (bufferPos < bufferLen)
         buffer[bufferPos] = 0;
-    //printf("******************* %f is, I think %s\n",dbgval,buffer);
 }
 
 static const char *WeaponTypeStrings[] = {
@@ -4615,7 +4643,7 @@ static const char *WeaponTypeStrings[] = {
 
 void showUnitStats( Unit *playerUnit, string &text, int subunitlevel, int mode, Cargo &item )
 {
-    static Unit *blankUnit   = UnitFactory::createUnit( "upgrading_dummy_unit", 1, FactionUtil::GetFactionIndex( "upgrades" ) );
+    static Unit *blankUnit   = new GameUnit( "upgrading_dummy_unit", 1, FactionUtil::GetFactionIndex( "upgrades" ) );
     static float warpenratio = XMLSupport::parse_float( vs_config->getVariable( "physics", "warp_energy_multiplier", "0.12" ) );
     static float warpbleed   = XMLSupport::parse_float( vs_config->getVariable( "physics", "warpbleed", "20" ) );
     static float shield_maintenance_cost =
@@ -4721,12 +4749,12 @@ void showUnitStats( Unit *playerUnit, string &text, int subunitlevel, int mode, 
         text += "#n##c0:1:.5#"+prefix+"[GENERAL INFORMATION]#n##-c";
 
         text += "#n#"+prefix+statcolor+"Class: #-c"+nametemp+statcolor+"    Model: #-c"+model;
-        PRETTY_ADDU( statcolor+"Mass: #-c", playerUnit->GetMass(), 0, "metric tons" );
+        PRETTY_ADDU( statcolor+"Mass: #-c", playerUnit->getMass(), 0, "metric tons" );
         //Irrelevant to player as is proportional to mass in our physics system.
         //PRETTY_ADDU("Moment of inertia: ",playerUnit->GetMoment(),2,"tons.m�");
     }
-    if ( mode && replacement_mode == 2 && playerUnit->GetMass() != blankUnit->GetMass() )
-        PRETTY_ADDU( statcolor+"Effective Mass reduced by: #-c", 100.0*( 1.0-playerUnit->GetMass() ), 0, "%" );
+    if ( mode && replacement_mode == 2 && playerUnit->getMass() != blankUnit->getMass() )
+        PRETTY_ADDU( statcolor+"Effective Mass reduced by: #-c", 100.0*( 1.0-playerUnit->getMass() ), 0, "%" );
     if (!subunitlevel) {
         float vol[2];
         float bvol[2];
@@ -4760,14 +4788,14 @@ void showUnitStats( Unit *playerUnit, string &text, int subunitlevel, int mode, 
     //following lines somewhat borken in terms of semantics for quantity of fuel
     //and policy of upgrades to fuel
     if (!mode) {
-        PRETTY_ADDU( statcolor+"Fuel capacity: #-c", playerUnit->FuelData(), 2, "metric tons of Lithium-6" );
-    } else if ( blankUnit->FuelData() != playerUnit->FuelData() ) {
+        PRETTY_ADDU( statcolor+"Fuel capacity: #-c", playerUnit->fuelData(), 2, "metric tons of Lithium-6" );
+    } else if ( blankUnit->fuelData() != playerUnit->fuelData() ) {
         switch (replacement_mode)
         {
         case 0:                 //Replacement or new Module
             break;
         case 1:                 //Additive
-            PRETTY_ADDU( statcolor+"Adds #-c", playerUnit->FuelData(), 2, "metric tons of Lithium-6 " /*+statcolor+"to Fuel Capacity #-c"*/ );
+            PRETTY_ADDU( statcolor+"Adds #-c", playerUnit->fuelData(), 2, "metric tons of Lithium-6 " /*+statcolor+"to Fuel Capacity #-c"*/ );
             break;
         case 2:                 //multiplicative
             break;
@@ -4778,8 +4806,8 @@ void showUnitStats( Unit *playerUnit, string &text, int subunitlevel, int mode, 
     }
     //const Unit::Computer uc  = playerUnit->ViewComputerData();
     //const Unit::Computer buc = blankUnit->ViewComputerData();
-    const Unit::Computer &uc  = playerUnit->ViewComputerData();
-    const Unit::Computer &buc = blankUnit->ViewComputerData();
+    const Computer &uc  = playerUnit->ViewComputerData();
+    const Computer &buc = blankUnit->ViewComputerData();
     if (!mode) {
         text += "#n##n#"+prefix+"#c0:1:.5#[FLIGHT CHARACTERISTICS]#n##-c";
         text += "#n#"+prefix+statcolor+"Turning response: #-c";
@@ -4790,7 +4818,7 @@ void showUnitStats( Unit *playerUnit, string &text, int subunitlevel, int mode, 
         if (!mode) {
             text += conversionBuffer;
             text += " radians/second^2#n#"+expstatcolor+"  (yaw, pitch, roll)#-c";
-        } else if (MODIFIES(replacement_mode, playerUnit, blankUnit, limits.yaw)) { 
+        } else if (MODIFIES(replacement_mode, playerUnit, blankUnit, limits.yaw)) {
             switch (replacement_mode)
             {
             case 0:                     //Replacement or new Module
@@ -4851,23 +4879,23 @@ void showUnitStats( Unit *playerUnit, string &text, int subunitlevel, int mode, 
         }
     }
     if (!subunitlevel) {
-        if ( !mode && (playerUnit->GetMass() != 0) ) {
+        if ( !mode && (playerUnit->getMass() != 0) ) {
             PRETTY_ADDU( statcolor+"Fore acceleration: #-c",
-                         playerUnit->limits.forward/( 9.8*playerUnit->GetMass() ), 2, "gravities" );
+                         playerUnit->limits.forward/( 9.8*playerUnit->getMass() ), 2, "gravities" );
             PRETTY_ADDU( statcolor+"Aft acceleration: #-c",
-                         playerUnit->limits.retro/( 9.8*playerUnit->GetMass() ), 2, "gravities" );
+                         playerUnit->limits.retro/( 9.8*playerUnit->getMass() ), 2, "gravities" );
             if (playerUnit->limits.lateral == playerUnit->limits.vertical) {
                 PRETTY_ADDU( statcolor+"Orthogonal acceleration: #-c",
-                             playerUnit->limits.vertical/( 9.8*playerUnit->GetMass() ), 2, "gravities" );
+                             playerUnit->limits.vertical/( 9.8*playerUnit->getMass() ), 2, "gravities" );
                 text += expstatcolor+"#n#  (vertical and lateral axes)#-c";
             } else {
-                PRETTY_ADDN( statcolor+" Lateral acceleration #-c", playerUnit->limits.lateral/( 9.8*playerUnit->GetMass() ), 2 );
+                PRETTY_ADDN( statcolor+" Lateral acceleration #-c", playerUnit->limits.lateral/( 9.8*playerUnit->getMass() ), 2 );
                 PRETTY_ADDN( statcolor+" Vertical acceleration #-c",
-                             playerUnit->limits.vertical/( 9.8*playerUnit->GetMass() ), 2 );
+                             playerUnit->limits.vertical/( 9.8*playerUnit->getMass() ), 2 );
                 text += " gravities";
             }
             PRETTY_ADDU( statcolor+"Forward acceleration with overthrust: #-c", playerUnit->limits.afterburn
-                         /( 9.8*playerUnit->GetMass() ), 2, "gravities" );
+                         /( 9.8*playerUnit->getMass() ), 2, "gravities" );
             text.append( "#n##n##c0:1:.5#"+prefix+"[GOVERNOR SETTINGS]#n##-c" );
         } else {
             switch (replacement_mode)
@@ -5124,15 +5152,15 @@ void showUnitStats( Unit *playerUnit, string &text, int subunitlevel, int mode, 
     const Unit::UnitJump &uj  = playerUnit->GetJumpStatus();
     const Unit::UnitJump &buj = blankUnit->GetJumpStatus();
     if (!mode) {
-        float maxshield = totalShieldEnergyCapacitance( playerUnit->shield );
+        float maxshield = Damageable::totalShieldEnergyCapacitance( playerUnit->shield );
         if (shields_require_power)
             maxshield = 0;
-        PRETTY_ADDU( statcolor+"Recharge: #-c", playerUnit->EnergyRechargeData()*RSconverter, 0, "MJ/s" );
+        PRETTY_ADDU( statcolor+"Recharge: #-c", playerUnit->energyRechargeData()*RSconverter, 0, "MJ/s" );
         PRETTY_ADDU( statcolor+"Weapon capacitor bank storage: #-c",
-                     ( (playerUnit->MaxEnergyData()-maxshield)*RSconverter ), 0, "MJ" );
+                     ( (playerUnit->maxEnergyData()-maxshield)*RSconverter ), 0, "MJ" );
         //note: I found no function to get max warp energy, but since we're docked they are the same
         if (!subunitlevel) {
-            PRETTY_ADDU( statcolor+"Warp capacitor bank storage: #-c", playerUnit->WarpCapData()*RSconverter*Wconv, 0, "MJ" );
+            PRETTY_ADDU( statcolor+"Warp capacitor bank storage: #-c", playerUnit->warpCapData()*RSconverter*Wconv, 0, "MJ" );
 
             text += "#n##n##c0:1:.5#"+prefix+"[SPEC SUBSYSTEM]#n##-c";
 
@@ -5150,7 +5178,7 @@ void showUnitStats( Unit *playerUnit, string &text, int subunitlevel, int mode, 
                     PRETTY_ADDU( statcolor+"Delay: #-c", uj.delay, 0, "seconds" );
                 if (uj.damage > 0)
                     PRETTY_ADDU( statcolor+"Damage to outsystem jump drive: #-c", uj.damage*VSDM, 0, "MJ" );
-                if (playerUnit->WarpCapData() < uj.energy) {
+                if (playerUnit->warpCapData() < uj.energy) {
                     text += "#n##c1:.3:.3#"+prefix
                             +
                             "WARNING: Warp capacitor banks under capacity for jump: upgrade warp capacitance#-c";
@@ -5161,41 +5189,41 @@ void showUnitStats( Unit *playerUnit, string &text, int subunitlevel, int mode, 
         switch (replacement_mode)
         {
         case 0:                 //Replacement or new Module
-            if ( MODIFIES(replacement_mode, playerUnit, blankUnit, EnergyRechargeData()) )
+            if ( MODIFIES(replacement_mode, playerUnit, blankUnit, energyRechargeData()) )
                 PRETTY_ADDU( statcolor+"Installs reactor with recharge rate: #-c",
-                             playerUnit->EnergyRechargeData()*RSconverter, 0, "MJ/s" );
-            if ( MODIFIES(replacement_mode, playerUnit, blankUnit, MaxEnergyData()) )
+                             playerUnit->energyRechargeData()*RSconverter, 0, "MJ/s" );
+            if ( MODIFIES(replacement_mode, playerUnit, blankUnit, maxEnergyData()) )
                 PRETTY_ADDU( statcolor+"Installs main capacitor bank with storage capacity: #-c",
-                             (playerUnit->MaxEnergyData()*RSconverter), 0, "MJ" );
-            if ( MODIFIES(replacement_mode, playerUnit, blankUnit, GetWarpEnergy()) )
+                             (playerUnit->maxEnergyData()*RSconverter), 0, "MJ" );
+            if ( MODIFIES(replacement_mode, playerUnit, blankUnit, getWarpEnergy()) )
                 PRETTY_ADDU( statcolor+"Installs warp capacitor bank with storage capacity: #-c",
-                             playerUnit->GetWarpEnergy()*RSconverter*Wconv, 0, "MJ" );
+                             playerUnit->getWarpEnergy()*RSconverter*Wconv, 0, "MJ" );
             if (buj.drive != uj.drive) {
                 text += statcolor +
                         "#n#Allows travel via Jump Points.#n#Consult your personal info screen for ship specific energy requirements. #-c";
             }
             break;
         case 1:                 //Additive
-            if ( MODIFIES(replacement_mode, playerUnit, blankUnit, EnergyRechargeData()) )
+            if ( MODIFIES(replacement_mode, playerUnit, blankUnit, energyRechargeData()) )
                 PRETTY_ADDU( statcolor+"Increases recharge rate by #-c",
-                             playerUnit->EnergyRechargeData()*RSconverter, 0, "MJ/s" );
-            if ( MODIFIES(replacement_mode, playerUnit, blankUnit, MaxEnergyData()) )
+                             playerUnit->energyRechargeData()*RSconverter, 0, "MJ/s" );
+            if ( MODIFIES(replacement_mode, playerUnit, blankUnit, maxEnergyData()) )
                 PRETTY_ADDU( statcolor+"Adds #-c",
-                             (playerUnit->MaxEnergyData()*RSconverter), 0, "MJ of storage to main capacitor banks" );
-            if ( MODIFIES(replacement_mode, playerUnit, blankUnit, GetWarpEnergy()) )
+                             (playerUnit->maxEnergyData()*RSconverter), 0, "MJ of storage to main capacitor banks" );
+            if ( MODIFIES(replacement_mode, playerUnit, blankUnit, getWarpEnergy()) )
                 PRETTY_ADDU( statcolor+"Adds #-c",
-                             playerUnit->GetWarpEnergy()*RSconverter*Wconv, 0, "MJ of storage to warp capacitor bank" );
+                             playerUnit->getWarpEnergy()*RSconverter*Wconv, 0, "MJ of storage to warp capacitor bank" );
             break;
         case 2:                 //multiplicative
-            if ( MODIFIES(replacement_mode, playerUnit, blankUnit, EnergyRechargeData()) )
+            if ( MODIFIES(replacement_mode, playerUnit, blankUnit, energyRechargeData()) )
                 PRETTY_ADDU( statcolor+"Increases reactor recharge rate by #-c",
-                             100.0*(playerUnit->EnergyRechargeData()-1), 0, "%" );
-            if ( MODIFIES(replacement_mode, playerUnit, blankUnit, MaxEnergyData()) )
+                             100.0*(playerUnit->energyRechargeData()-1), 0, "%" );
+            if ( MODIFIES(replacement_mode, playerUnit, blankUnit, maxEnergyData()) )
                 PRETTY_ADDU( statcolor+"Increases main capacitor bank storage by #-c",
-                             100.0*(playerUnit->MaxEnergyData()-1), 0, "%" );
-            if ( MODIFIES(replacement_mode, playerUnit, blankUnit, GetWarpEnergy()) )
+                             100.0*(playerUnit->maxEnergyData()-1), 0, "%" );
+            if ( MODIFIES(replacement_mode, playerUnit, blankUnit, getWarpEnergy()) )
                 PRETTY_ADDU( statcolor+"Increases warp capacitor bank storage by #-c",
-                             (playerUnit->GetWarpEnergy()-1)*100, 0, "%" );
+                             (playerUnit->getWarpEnergy()-1)*100, 0, "%" );
             break;
         default:                 //Failure
             text += "Oh dear, this wasn't an upgrade. Please debug code.";
@@ -5471,7 +5499,7 @@ void showUnitStats( Unit *playerUnit, string &text, int subunitlevel, int mode, 
     if (playerUnit->cloaking != -1) {
         if (!mode) {
             PRETTY_ADDU( statcolor+"Cloaking device available, energy usage: #-c",
-                         playerUnit->pImage->cloakenergy*RSconverter*Wconv,
+                         playerUnit->cloakenergy*RSconverter*Wconv,
                          0,
                          "MJ/s" );
         } else {
@@ -5479,7 +5507,7 @@ void showUnitStats( Unit *playerUnit, string &text, int subunitlevel, int mode, 
             {
             case 0:                     //Replacement or new Module
                 PRETTY_ADDU( statcolor+"Installs a cloaking device.#n#  Activated energy usage: #-c",
-                             playerUnit->pImage->cloakenergy*RSconverter*Wconv,
+                             playerUnit->cloakenergy*RSconverter*Wconv,
                              0,
                              "MJ/s" );
                 break;
@@ -5502,13 +5530,13 @@ void showUnitStats( Unit *playerUnit, string &text, int subunitlevel, int mode, 
     }
     //let's go through all mountpoints
     {
-        for (int i = 0; i < playerUnit->GetNumMounts(); i++) {
+        for (int i = 0; i < playerUnit->getNumMounts(); i++) {
             if (!mode) {
                 PRETTY_ADD( " #c0:1:.3#[#-c", i+1, 0 );
-                text += "#c0:1:.3#]#-c #c0:1:1#"+lookupMountSize( playerUnit->mounts[i].size )+"#-c";
+                text += "#c0:1:.3#]#-c #c0:1:1#"+getMountSizeString( playerUnit->mounts[i].size )+"#-c";
             }
             const weapon_info *wi = playerUnit->mounts[i].type;
-            if (wi && wi->weapon_name != "")
+            if (wi && wi->name != "")
                 anyweapons = true;
         }
     }
@@ -5516,105 +5544,105 @@ void showUnitStats( Unit *playerUnit, string &text, int subunitlevel, int mode, 
         text += "#n#"+prefix+"MOUNTED:";          //need brace for namespace issues on VC++
     {
         if (anyweapons) {
-            for (int i = 0; i < playerUnit->GetNumMounts(); i++) {
+            for (int i = 0; i < playerUnit->getNumMounts(); i++) {
                 const weapon_info *wi = playerUnit->mounts[i].type;
-                if ( (!wi) || (wi->weapon_name == "") ) {
+                if ( (!wi) || (wi->name == "") ) {
                     continue;
                 } else {
                     if (!mode) {
                         PRETTY_ADD( "  #c0:1:.3#[#-c", i+1, 0 );
                         text += "#c0:1:.3#]#-c ";
                     }
-                    text += wi->weapon_name+": #c0:1:1#"+lookupMountSize( wi->size )+"#-c#c.9:.9:.5#"
-                            +WeaponTypeStrings[wi->type]+" #-c";
-                    if (wi->Damage < 0) {text += "#n#"+prefix+statcolor+"   Damage:#-c special"; } else {
+                    text += wi->name+": #c0:1:1#"+getMountSizeString( as_integer(wi->size) )+"#-c#c.9:.9:.5#"
+                            +WeaponTypeStrings[as_integer(wi->type)]+" #-c";
+                    if (wi->damage < 0) {text += "#n#"+prefix+statcolor+"   Damage:#-c special"; } else {
                         PRETTY_ADDU( statcolor+"   Damage: #-c",
-                                     wi->Damage*VSDM,
+                                     wi->damage*VSDM,
                                      0,
-                                     wi->type == weapon_info::BEAM ? "MJ/s" : "MJ" );
-                        if (wi->PhaseDamage > 0)
+                                     wi->type == WEAPON_TYPE::BEAM ? "MJ/s" : "MJ" );
+                        if (wi->phase_damage > 0)
                             PRETTY_ADDU( statcolor+"   Phase damage: #-c",
-                                         wi->PhaseDamage*VSDM,
+                                         wi->phase_damage*VSDM,
                                          0,
-                                         wi->type == weapon_info::BEAM ? "MJ/s" : "MJ" );
+                                         wi->type == WEAPON_TYPE::BEAM ? "MJ/s" : "MJ" );
                    }
                     PRETTY_ADDU( statcolor+"   Energy usage: #-c",
-                                 wi->EnergyRate*RSconverter,
+                                 wi->energy_rate*RSconverter,
                                  0,
-                                 wi->type == weapon_info::BEAM ? "MJ/s" : "MJ/shot" );
+                                 wi->type == WEAPON_TYPE::BEAM ? "MJ/s" : "MJ/shot" );
                     PRETTY_ADDU( statcolor+"   Refire delay: #-c", wi->Refire(), 2, "seconds" );
                     //display info specific to some weapons type
 
-                    PRETTY_ADDU( statcolor+"   Range: #-c", wi->Range, 0, "meters" );
-                    if ( ( 100000*(1.0-wi->Longrange)/(wi->Range) ) > 0.00001 ) {
+                    PRETTY_ADDU( statcolor+"   Range: #-c", wi->range, 0, "meters" );
+                    if ( ( 100000*(1.0-wi->long_range)/(wi->range) ) > 0.00001 ) {
                         PRETTY_ADD( statcolor+"   Range attenuation factor: #-c",
-                                        100000*(1.0-wi->Longrange)/(wi->Range),
+                                        100000*(1.0-wi->long_range)/(wi->range),
                                         2 );
                         text += "% per km";
                     }
 
                     switch (wi->type)
                     {
-                    case weapon_info::BALL:                     //may need ammo
-                    case weapon_info::BOLT:
-                        if (wi->Damage > 0)
-                            totalWeaponDamage += ( wi->Damage/wi->Refire() );                              //damage per second
-                        if (wi->PhaseDamage > 0)
-                            totalWeaponDamage += ( wi->PhaseDamage/wi->Refire() );                              //damage per second
+                    case WEAPON_TYPE::BALL:                     //may need ammo
+                    case WEAPON_TYPE::BOLT:
+                        if (wi->damage > 0)
+                            totalWeaponDamage += ( wi->damage/wi->Refire() );                              //damage per second
+                        if (wi->phase_damage > 0)
+                            totalWeaponDamage += ( wi->phase_damage/wi->Refire() );                              //damage per second
 
-                        PRETTY_ADDU( statcolor+"   Exit velocity: #-c", wi->Speed, 0, "meters/second" );
+                        PRETTY_ADDU( statcolor+"   Exit velocity: #-c", wi->speed, 0, "meters/second" );
                         if ( playerUnit->mounts[i].ammo != -1) {
-                            if ( (wi->size & weapon_info::SPECIALMISSILE) == 0)
+                            if ( (as_integer(wi->size) & as_integer(MOUNT_SIZE::SPECIALMISSILE)) == 0)
                                 PRETTY_ADD( statcolor+"   Rounds remaining: #-c", playerUnit->mounts[i].ammo, 0 );
                             else
                                 PRETTY_ADD( statcolor+"   Rockets remaining: #-c", playerUnit->mounts[i].ammo, 0 );
                         }
-                        totalWeaponEnergyUsage += ( wi->EnergyRate/wi->Refire() );
+                        totalWeaponEnergyUsage += ( wi->energy_rate/wi->Refire() );
                         break;
-                    case weapon_info::PROJECTILE:                     //need ammo
-                        if (wi->LockTime > 0) {
-                            PRETTY_ADDU( statcolor+"   'Fire and Forget' lock time: #-c", wi->LockTime, 0, "seconds" );
+                    case WEAPON_TYPE::PROJECTILE:                     //need ammo
+                        if (wi->lock_time > 0) {
+                            PRETTY_ADDU( statcolor+"   'Fire and Forget' lock time: #-c", wi->lock_time, 0, "seconds" );
                         } else {
                             text += "#n#";
                             text += prefix;
                             text += statcolor+"   Missile Lock Type: #-c#c1:.3:.3#None.#-c Inertial Guidance Only";
                         }
                         PRETTY_ADD( statcolor+"   Missiles remaining: #-c", playerUnit->mounts[i].ammo, 0 );
-                        totalWeaponEnergyUsage += ( wi->EnergyRate/wi->Refire() );
+                        totalWeaponEnergyUsage += ( wi->energy_rate/wi->Refire() );
                         break;
-                    case weapon_info::BEAM:
-                        if (wi->Damage > 0)
-                            totalWeaponDamage += wi->Damage;
-                        if (wi->PhaseDamage > 0)
-                            totalWeaponDamage += wi->PhaseDamage;
-                        PRETTY_ADDU( statcolor+"   Beam stability: #-c", wi->Stability, 2, "seconds" );
+                    case WEAPON_TYPE::BEAM:
+                        if (wi->damage > 0)
+                            totalWeaponDamage += wi->damage;
+                        if (wi->phase_damage > 0)
+                            totalWeaponDamage += wi->phase_damage;
+                        PRETTY_ADDU( statcolor+"   Beam stability: #-c", wi->stability, 2, "seconds" );
                         if ( playerUnit->mounts[i].ammo != -1)
                             PRETTY_ADD( statcolor+"   Shots remaining: #-c", playerUnit->mounts[i].ammo, 0 );
-                        totalWeaponEnergyUsage += wi->EnergyRate;
+                        totalWeaponEnergyUsage += wi->energy_rate;
                         break;
                     default:
                         break;
                     }
                     if ( (mode!=0) &&
-                         (wi->type != weapon_info::PROJECTILE) &&
+                         (wi->type != WEAPON_TYPE::PROJECTILE) &&
                          (wi->Refire()>0) &&
-                         ( (wi->Damage != 0) || (wi->PhaseDamage != 0) || (wi->EnergyRate != 0) ))
+                         ( (wi->damage != 0) || (wi->phase_damage != 0) || (wi->energy_rate != 0) ))
                     {
                         text += "#n##n#"+prefix+statcolor+"   Average for continuous firing:#-c";
-                        float shot_cycle_mul = wi->type==weapon_info::BEAM ?
-                                                    wi->Stability / ( wi->Refire() + wi->Stability ) :
+                        float shot_cycle_mul = wi->type==WEAPON_TYPE::BEAM ?
+                                                    wi->stability / ( wi->Refire() + wi->stability ) :
                                                     1 / wi->Refire();
-                        if (wi->Damage != 0)
+                        if (wi->damage != 0)
                             PRETTY_ADDU( statcolor+"   Damage: #-c",
-                                     wi->Damage*VSDM*shot_cycle_mul,
+                                     wi->damage*VSDM*shot_cycle_mul,
                                      2, "MJ/s" );
-                        if (wi->PhaseDamage != 0)
+                        if (wi->phase_damage != 0)
                             PRETTY_ADDU( statcolor+"   Phase damage: #-c",
-                                         wi->PhaseDamage*VSDM*shot_cycle_mul,
+                                         wi->phase_damage*VSDM*shot_cycle_mul,
                                          2, "MJ/s" );
-                        if (wi->EnergyRate != 0)
+                        if (wi->energy_rate != 0)
                             PRETTY_ADDU( statcolor+"   Energy usage: #-c",
-                                         wi->EnergyRate*RSconverter*shot_cycle_mul,
+                                         wi->energy_rate*RSconverter*shot_cycle_mul,
                                          2, "MJ/s" );
                    }
                             text += "#n#";
@@ -5629,33 +5657,33 @@ void showUnitStats( Unit *playerUnit, string &text, int subunitlevel, int mode, 
         return;
     if (subunitlevel == 0 && mode == 0) {
         text += "#n##n##c0:1:.5#"+prefix+"[KEY FIGURES]#n##-c";
-        float maxshield = totalShieldEnergyCapacitance( playerUnit->shield );
+        float maxshield = Damageable::totalShieldEnergyCapacitance( playerUnit->shield );
         if (shields_require_power)
             maxshield = 0;
         PRETTY_ADDU( statcolor+"Minimum time to reach full overthrust speed: #-c",
-                     playerUnit->GetMass()*uc.max_ab_speed()/playerUnit->limits.afterburn, 2, "seconds" );
+                     playerUnit->getMass()*uc.max_ab_speed()/playerUnit->limits.afterburn, 2, "seconds" );
         //reactor
-        float avail    = (playerUnit->MaxEnergyData()*RSconverter-maxshield*VSDM);
+        float avail    = (playerUnit->maxEnergyData()*RSconverter-maxshield*VSDM);
         float overhead =
             (shields_require_power) ? (playerUnit->shield.recharge/shieldenergycap*shield_maintenance_cost
                                        *playerUnit->shield.number*VSDM) : 0;
-        float nrt = avail/(playerUnit->EnergyRechargeData()*RSconverter-overhead);
+        float nrt = avail/(playerUnit->energyRechargeData()*RSconverter-overhead);
         PRETTY_ADDU( statcolor+"Reactor nominal replenish time: #-c", nrt, 2, "seconds" );
         //shield related stuff
         //code taken from RegenShields in unit_generic.cpp, so we're sure what we say here is correct.
         static float low_power_mode = XMLSupport::parse_float( vs_config->getVariable( "physics", "low_power_mode_energy", "10" ) );
-        if (playerUnit->MaxEnergyData()-maxshield < low_power_mode) {
+        if (playerUnit->maxEnergyData()-maxshield < low_power_mode) {
             text += "#n##c1:.3:.3#"+prefix
                     +
                     "WARNING: Capacitor banks are overdrawn: downgrade shield, upgrade reactor or purchase reactor capacitance!#-c";
         }
-        if (uj.drive != -2 && playerUnit->WarpCapData() < uj.energy) {
+        if (uj.drive != -2 && playerUnit->warpCapData() < uj.energy) {
             text += "#n##c1:.3:.3#"+prefix
                     +
                     "WARNING: Warp capacitor banks under capacity for jump: upgrade warp capacitance#-c";
         }
         if (playerUnit->shield.number) {
-            if (playerUnit->shield.recharge*playerUnit->shield.number*VSDM/shieldenergycap > playerUnit->EnergyRechargeData()
+            if (playerUnit->shield.recharge*playerUnit->shield.number*VSDM/shieldenergycap > playerUnit->energyRechargeData()
                 *RSconverter) {
                 text += "#n##c1:1:.1#"+prefix+"WARNING: reactor recharge rate is less than combined shield recharge rate.#n#";
                 text += "Your shields won't be able to regenerate at their optimal speed!#-c";
@@ -5663,9 +5691,8 @@ void showUnitStats( Unit *playerUnit, string &text, int subunitlevel, int mode, 
             if (shields_require_power) {
                 text += "#n#"+prefix+statcolor+"Reactor recharge slowdown caused by shield maintenance: #-c";
                 float maint_draw_percent = playerUnit->shield.recharge*VSDM*100.0/shieldenergycap*shield_maintenance_cost
-                                           *playerUnit->shield.number/(playerUnit->EnergyRechargeData()*RSconverter);
-                sprintf( conversionBuffer, "%.2f", maint_draw_percent );
-                text += conversionBuffer;
+                                           *playerUnit->shield.number/(playerUnit->energyRechargeData()*RSconverter);
+                text += (boost::format("%1$.2f") % maint_draw_percent).str();
                 text += " %.";
                 if (maint_draw_percent > 60) {
                     text += "#n##c1:1:.1#"+prefix
@@ -5683,13 +5710,13 @@ void showUnitStats( Unit *playerUnit, string &text, int subunitlevel, int mode, 
         float maint_draw =
             (shields_require_power && playerUnit->shield.number) ? (playerUnit->shield.recharge*VSDM/shieldenergycap
                                                                     *shield_maintenance_cost*playerUnit->shield.number) : 0;
-        if ( totalWeaponEnergyUsage < (playerUnit->EnergyRechargeData()*RSconverter-maint_draw) ) {
+        if ( totalWeaponEnergyUsage < (playerUnit->energyRechargeData()*RSconverter-maint_draw) ) {
             //waouh, impressive...
             text += "#n##c0:1:.2#"+prefix+"Your reactor produces more energy than your weapons can use!#-c";
         } else {
             PRETTY_ADDU( statcolor+"Reactor energy depletion time if weapons in continuous use: #-c",
-                         (playerUnit->MaxEnergyData()
-                          *RSconverter)/( totalWeaponEnergyUsage-( (playerUnit->EnergyRechargeData()*RSconverter-maint_draw) ) ),
+                         (playerUnit->maxEnergyData()
+                          *RSconverter)/( totalWeaponEnergyUsage-( (playerUnit->energyRechargeData()*RSconverter-maint_draw) ) ),
                          2,
                          "seconds" );
         }
@@ -5955,6 +5982,10 @@ bool BaseComputer::actionConfirmedLoadGame()
     if (desc) {
         std::string tmp = desc->text();
         if (tmp.length() > 0) {
+            if ((string( "New_Game" ) != tmp) && (!isUtf8SaveGame(tmp))) {
+                showAlert( tmp + " is not UTF-8, convert it before loading" );
+                return true;
+            }
             Cockpit *cockpit = player ? _Universe->isPlayerStarship( player ) : 0;
             if (player && cockpit) {
                 UniverseUtil::showSplashScreen( "" );

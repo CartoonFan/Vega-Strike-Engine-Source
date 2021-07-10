@@ -1,3 +1,29 @@
+/**
+ * firekeyboard.cpp
+ *
+ * Copyright (C) Daniel Horn
+ * Copyright (C) 2020 pyramid3d, Stephen G. Tuggy, and other Vega Strike
+ * contributors
+ *
+ * https://github.com/vegastrike/Vega-Strike-Engine-Source
+ *
+ * This file is part of Vega Strike.
+ *
+ * Vega Strike is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * Vega Strike is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with Vega Strike.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+
 /// Keyboard parsing
 /// Parses keyboard commands
 
@@ -27,6 +53,9 @@
 #include "cmd/role_bitmask.h"
 #include "cmd/script/pythonmission.h"
 #include "universe_util.h"
+#include "universe.h"
+#include "mount_size.h"
+#include "weapon_info.h"
 
 extern bool toggle_pause();
 
@@ -955,7 +984,7 @@ bool TargSig( Unit *me, Unit *target )
             me,
             target );
     if (can_target_asteroid == false)
-        if (target->isUnit() == ASTEROIDPTR || target->name.get().find( "Asteroid" ) == 0)
+        if (target->isUnit() == _UnitType::asteroid || target->name.get().find( "Asteroid" ) == 0)
             ret = false;
     return ret;
 }
@@ -968,14 +997,14 @@ bool TargUn( Unit *me, Unit *target )
     int up = FactionUtil::GetUpgradeFaction();
     return me->InRange( target, true,
                         false )
-           && (target->isUnit() == UNITPTR
-               || target->isUnit() == ENHANCEMENTPTR) && getTopLevelOwner() != target->owner
+           && (target->isUnit() == _UnitType::unit
+               || target->isUnit() == _UnitType::enhancement) && getTopLevelOwner() != target->owner
            && (can_target_cargo || target->faction != up) && isNotTurretOwner( me, target );
 }
 
 bool TargMissile( Unit *me, Unit *target )
 {
-    return me->InRange( target, true, false ) && (target->isUnit() == MISSILEPTR) && isNotTurretOwner( me, target );
+    return me->InRange( target, true, false ) && (target->isUnit() == _UnitType::missile) && isNotTurretOwner( me, target );
 }
 
 bool TargIncomingMissile( Unit *me, Unit *target )
@@ -1001,7 +1030,7 @@ bool TargThreat( Unit *me, Unit *target )
 {
     if ( !TargAll( me, target ) )
         return false;
-    if (target->isUnit() == MISSILEPTR)
+    if (target->isUnit() == _UnitType::missile)
         return false;
     if (target->Target() == me)
         return true;
@@ -1018,7 +1047,7 @@ bool TargNear( Unit *me, Unit *target )
                            target )
             || target->getRelation( me ) < 0)
            && TargAll( me,
-                       target ) && target->isUnit() != MISSILEPTR
+                       target ) && target->isUnit() != _UnitType::missile
            && ( can_target_sun || !UnitUtil::isSun( target ) ) && isNotTurretOwner( me,
    target );
 }
@@ -1046,16 +1075,16 @@ bool getNearestTargetUnit( Unit *me, int iType )
             || !( me->InRange( un, true, true ) ) )
             continue;
         if ( (iType == 0)
-            && ( (un->isUnit() != UNITPTR)
+            && ( (un->isUnit() != _UnitType::unit)
                 || !me->isEnemy( un ) ) )
             continue;
         if ( (iType == 1)
-            && ( (un->isUnit() != UNITPTR)
+            && ( (un->isUnit() != _UnitType::unit)
                 || ( !me->isEnemy( un )
                     && (un->Target() != me) ) ) )
             continue;
         if ( (iType == 2)
-            && ( (un->isUnit() != UNITPTR)
+            && ( (un->isUnit() != _UnitType::unit)
                 || me->isEnemy( un )
                 || (UnitUtil::getFlightgroupName( un ) == "Base") ) )
             continue;
@@ -1127,8 +1156,9 @@ bool ChooseTargets( Unit *me, bool (*typeofunit)( Unit*, Unit* ), bool reverse )
             ++veciter;
         }
         ++cur;
-        if (cur >= 2)
+        if (cur >= 2) {
             break;
+        }
         veciter = vec.begin();
     }
     return true;
@@ -1137,12 +1167,14 @@ bool ChooseTargets( Unit *me, bool (*typeofunit)( Unit*, Unit* ), bool reverse )
 void ChooseSubTargets( Unit *me )
 {
     Unit   *parent = UnitUtil::owner( me->Target() );
-    if (!parent)
+    if (!parent) {
         return;
+    }
     un_iter uniter = parent->getSubUnits();
     if ( parent == me->Target() ) {
-        if ( !(*uniter) )
+        if ( !(*uniter) ) {
             return;
+        }
         me->Target( *uniter );
         return;
     }
@@ -1153,17 +1185,18 @@ void ChooseSubTargets( Unit *me )
             tUnit = *uniter;
             break;
         }
-    if (tUnit)
+    if (tUnit) {
         me->Target( tUnit );
-    else
+    } else {
         me->Target( parent );
+    }
 }
 
 FireKeyboard::~FireKeyboard()
 {
 #ifdef ORDERDEBUG
-    VSFileSystem::vs_fprintf( stderr, "fkb%x", this );
-    fflush( stderr );
+    BOOST_LOG_TRIVIAL(trace) << boost::format("fkb%1$x") % this;
+    VSFileSystem::flushLogs();
 #endif
 }
 
@@ -1171,12 +1204,14 @@ bool FireKeyboard::ShouldFire( Unit *targ )
 {
     float dist = FLT_MAX;
     float mrange;
-    if (gunspeed == .0001)
+    if (gunspeed == .0001) {
         parent->getAverageGunSpeed( gunspeed, gunrange, mrange );
+    }
     float angle = parent->cosAngleTo( targ, dist, gunspeed, gunrange );
     targ->Threaten( parent, angle/(dist < .8 ? .8 : dist) );
-    if ( targ == parent->Target() )
+    if ( targ == parent->Target() ) {
         distance = dist;
+    }
     return dist < .8 && angle > 1;
 }
 
@@ -1186,10 +1221,13 @@ static bool UnDockNow( Unit *me, Unit *targ )
     Unit *un;
     for (un_iter i = _Universe->activeStarSystem()->getUnitList().createIterator();
          (un = *i) != NULL;
-         ++i)
-        if ( un->isDocked( me ) )
-            if ( me->UnDock( un ) )
+         ++i) {
+        if ( un->isDocked( me ) ) {
+            if ( me->UnDock( un ) ) {
                 ret = true;
+            }
+        }
+    }
     return ret;
 }
 
@@ -1630,20 +1668,18 @@ void FireKeyboard::Execute()
             if (!allow_special_with_weapons) {
                 bool special = false;
                 bool normal  = false;
-                int  nm = parent->GetNumMounts();
+                int  nm = parent->getNumMounts();
                 int  i;
-                for (i = 0; i < nm; ++i)
+                for (i = 0; i < nm; ++i) {
                     if (parent->mounts[i].status == Mount::ACTIVE) {
-                        special = special || (parent->mounts[i].type->size&weapon_info::SPECIAL) != 0;
-                        normal  = normal
-      || ( parent->mounts[i].type->size
-          &(weapon_info::LIGHT|weapon_info::MEDIUM|weapon_info::HEAVY|weapon_info::CAPSHIPLIGHT
-            |weapon_info::CAPSHIPHEAVY) ) != 0;
+                        special = special || isSpecialGunMount(as_integer(parent->mounts[i].type->size));
+                        normal  = normal  || isNormalGunMount(as_integer(parent->mounts[i].type->size));
                     }
+                }
                 for (i = 0; i < nm; ++i)
                     if (special && normal) {
                         if (parent->mounts[i].status == Mount::ACTIVE)
-                            if ( (parent->mounts[i].type->size&weapon_info::SPECIAL) != 0 )
+                            if ( isSpecialGunMount(as_integer(parent->mounts[i].type->size)))
     parent->mounts[i].status = Mount::INACTIVE;
                     }
             }
@@ -2047,7 +2083,7 @@ void FireKeyboard::Execute()
             cp->EjectDock();              //use specialized ejectdock in the future
     }
     static bool actually_arrest = XMLSupport::parse_bool( vs_config->getVariable( "AI", "arrest_energy_zero", "false" ) );
-    if (actually_arrest && parent->EnergyRechargeData() == 0)
+    if (actually_arrest && parent->energyRechargeData() == 0)
         Arrested( parent );
 }
 

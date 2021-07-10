@@ -1,5 +1,31 @@
 // -*- mode: c++; c-basic-offset: 4; indent-tabs-mode: nil -*-
 
+/**
+ * cockpit.cpp
+ *
+ * Copyright (C) Daniel Horn
+ * Copyright (C) 2020 pyramid3d, Stephen G. Tuggy, and other Vega Strike
+ * contributors
+ *
+ * https://github.com/vegastrike/Vega-Strike-Engine-Source
+ *
+ * This file is part of Vega Strike.
+ *
+ * Vega Strike is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * Vega Strike is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with Vega Strike.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+
 /// Draws cockpit parts
 /// Draws gauges, info strings, radar, ...
 
@@ -19,7 +45,7 @@
 #include "universe.h"
 #include "star_system.h"
 #include "cmd/unit_generic.h"
-#include "cmd/unit_factory.h"
+#include "cmd/movable.h"
 #include "cmd/collection.h"
 #include "cmd/unit_util.h"
 #include "cmd/unit_find.h" //for radar iteration.
@@ -56,7 +82,9 @@
 #include "options.h"
 #include "soundcontainer_aldrv.h"
 #include "configxml.h"
-
+#include "planet.h"
+#include "mount_size.h"
+#include "weapon_info.h"
 
 
 using std::min;
@@ -296,7 +324,6 @@ inline void DrawOneTargetBox( const QVector &Loc,
             GFXDraw( GFXLINE, verts );
         } else {
             float  max   = diamondsize;
-            //VSFileSystem::Fprintf (stderr,"lock percent %f\n",lock_percent);
             float  coord = endreticle+(startreticle-endreticle)*lock_percent;              //rSize/(1-lock_percent);//this is a number between 1 and 100
             double rtot  = 1./sqrtf( 2 );
 
@@ -588,7 +615,7 @@ void GameCockpit::DrawTargetBox(const Radar::Sensor& sensor)
     // FIXME: Replace with UnitUtil::isDockableUnit?
     if ( draw_target_nav_symbol
         && ( (target->faction == neutral
-              && target->isUnit() == UNITPTR) || target->isUnit() == ASTEROIDPTR
+              && target->isUnit() == _UnitType::unit) || target->isUnit() == _UnitType::asteroid
             || ( target->isPlanet() && ( (Planet*) target )->isAtmospheric()
                 && ( draw_jump_nav_symbol
                      || target->GetDestinations().empty() ) ) || !sensor.InRange(track)) ) {
@@ -633,25 +660,25 @@ void GameCockpit::DrawTargetBox(const Radar::Sensor& sensor)
             DrawITTSMark(scatter, p, q, iLoc, trackcolor);
         }
         else {	// per-mount ITTS
-            int nummounts = player->GetNumMounts();
+            int nummounts = player->getNumMounts();
             if (draw_line_to_itts) {
                 for (int i = 0; i < nummounts; i++) {
                     if ( (player->mounts[i].status == Mount::ACTIVE)
-                        && (ITTS_for_beams || (player->mounts[i].type->type != weapon_info::BEAM))
-                        && (ITTS_for_locks || (player->mounts[i].type->LockTime == 0)) )
+                        && (ITTS_for_beams || (player->mounts[i].type->type != WEAPON_TYPE::BEAM))
+                        && (ITTS_for_locks || (player->mounts[i].type->lock_time == 0)) )
                     {
-                        iLoc = target->PositionITTS( PlayerPosition, PlayerVelocity, player->mounts[i].type->Speed, steady_itts ) - offs;
+                        iLoc = target->PositionITTS( PlayerPosition, PlayerVelocity, player->mounts[i].type->speed, steady_itts ) - offs;
                         DrawITTSLine( Loc, iLoc, GFXColor(trackcolor.r, trackcolor.g, trackcolor.b, line_to_itts_alpha) );
                     }
                 }
             }
             for (int i = 0; i < nummounts; i++) {
                 if ( (player->mounts[i].status == Mount::ACTIVE)
-                    && (ITTS_for_beams || (player->mounts[i].type->type != weapon_info::BEAM))
-                    && (ITTS_for_locks || (player->mounts[i].type->LockTime == 0)) )
+                    && (ITTS_for_beams || (player->mounts[i].type->type != WEAPON_TYPE::BEAM))
+                    && (ITTS_for_locks || (player->mounts[i].type->lock_time == 0)) )
                 {
                     mntcolor = MountColor( &player->mounts[i] );
-                    iLoc = target->PositionITTS( PlayerPosition, PlayerVelocity, player->mounts[i].type->Speed, steady_itts ) - offs;
+                    iLoc = target->PositionITTS( PlayerPosition, PlayerVelocity, player->mounts[i].type->speed, steady_itts ) - offs;
                     DrawITTSMark(scatter, p, q, iLoc, mntcolor);
                 }
             }
@@ -947,7 +974,7 @@ void GameCockpit::AutoLanding()
         if (player == NULL)
             return;
 
-        CollideMap *collideMap = _Universe->activeStarSystem()->collidemap[Unit::UNIT_ONLY];
+        CollideMap *collideMap = _Universe->activeStarSystem()->collide_map[Unit::UNIT_ONLY];
         for (CollideMap::iterator it = collideMap->begin(); it != collideMap->end(); ++it)
         {
             if (it->radius <= 0)
@@ -1093,20 +1120,20 @@ float GameCockpit::LookupUnitStat( int stat, Unit *target )
             return .25*(armordat[0]+armordat[2]+armordat[4]+armordat[6]);
         }
     case UnitImages< void >::FUEL:
-        if (target->FuelData() > maxfuel)
-            maxfuel = target->FuelData();
-        if (maxfuel > 0) return target->FuelData()/maxfuel;
+        if (target->fuelData() > maxfuel)
+            maxfuel = target->fuelData();
+        if (maxfuel > 0) return target->fuelData()/maxfuel;
         return 0;
 
     case UnitImages< void >::ENERGY:
-        return target->EnergyData();
+        return target->energyData();
 
     case UnitImages< void >::WARPENERGY:
         {
             static bool warpifnojump =
                 XMLSupport::parse_bool( vs_config->getVariable( "graphics", "hud", "display_warp_energy_if_no_jump_drive",
                                                                 "true" ) );
-            return (warpifnojump || target->GetJumpStatus().drive != -2) ? target->WarpEnergyData() : 0;
+            return (warpifnojump || target->GetJumpStatus().drive != -2) ? target->warpEnergyData() : 0;
         }
     case UnitImages< void >::HULL:
         if ( maxhull < target->GetHull() )
@@ -1169,7 +1196,7 @@ float GameCockpit::LookupUnitStat( int stat, Unit *target )
         return target->graphicOptions.WarpFieldStrength;
 
     case UnitImages< void >::MAXWARPFIELDSTRENGTH:
-        return target->GetMaxWarpFieldStrength();
+        return target->GetMaxWarpFieldStrength(1.f);
 
     case UnitImages< void >::JUMP:
         return jumpok ? 1 : 0;
@@ -1240,7 +1267,7 @@ float GameCockpit::LookupUnitStat( int stat, Unit *target )
         {
             float basemass = atof( UniverseUtil::LookupUnitStat( target->name, "", "Mass" ).c_str() );
             if (basemass > 0)
-                return 100*target->Mass/basemass;
+                return 100*target->getMass()/basemass;
             else
                 return 0;
         }
@@ -1325,7 +1352,7 @@ float GameCockpit::LookupUnitStat( int stat, Unit *target )
         else
             return (float) UnitImages< void >::OFF;
     case UnitImages< void >::ECM_MODAL:
-        if (target->GetImageInformation().ecm > 0)
+        if (target->ecm > 0)
             return (target->GetComputerData().ecmactive ? (float) UnitImages< void >::ACTIVE : (float) UnitImages< void >::READY);
         else
             return (float) UnitImages< void >::NOTAPPLICABLE;
@@ -1371,7 +1398,7 @@ float GameCockpit::LookupUnitStat( int stat, Unit *target )
     case UnitImages< void >::CANJUMP_MODAL:
         if (-2 == target->GetJumpStatus().drive)
             return (float) UnitImages< void >::NODRIVE;
-        else if (target->GetWarpEnergy() < target->GetJumpStatus().energy)
+        else if (target->getWarpEnergy() < target->GetJumpStatus().energy)
             return (float) UnitImages< void >::NOTENOUGHENERGY;
         else if (target->graphicOptions.InWarp)          //FIXME
             return (float) UnitImages< void >::OFF;
@@ -1406,13 +1433,14 @@ float GameCockpit::LookupUnitStat( int stat, Unit *target )
 void GameCockpit::DrawTargetGauges( Unit *target )
 {
     int i;
-    //printf ("(debug)UNIT NAME:%s\n",UnitUtil::getName(target).c_str());
-    //printf ("(debug)TARGETSHIELDF:%1.2f\n",target->FShieldData());
-    for (i = UnitImages< void >::TARGETSHIELDF; i < UnitImages< void >::KPS; i++)
-        if (gauges[i])
+    for (i = UnitImages< void >::TARGETSHIELDF; i < UnitImages< void >::KPS; i++) {
+        if (gauges[i]) {
             gauges[i]->Draw( LookupTargetStat( i, target ) );
-    if (!text)
+        }
+    }
+    if (!text) {
         return;
+    }
 }
 
 GameCockpit::LastState::LastState()
@@ -1438,28 +1466,27 @@ void GameCockpit::TriggerEvents( Unit *un ) {
     else
         last.processing_time = curtime;
 
-    // VSFileSystem::vs_dprintf(3, "Processing events\n");
     BOOST_LOG_TRIVIAL(trace) << "Processing events";
     for (EVENTID event = EVENTID_FIRST; event < NUM_EVENTS; event = (EVENTID)(event+1)) {
         GameSoundContainer *sound = static_cast<GameSoundContainer*>(GetSoundForEvent(event));
         if (sound != NULL) {
 
-            #define MODAL_TRIGGER(name, _triggervalue, _curvalue, lastvar) \
-                do { \
-                    bool triggervalue = _triggervalue; \
-                    bool curvalue = _curvalue; \
-                    VSFileSystem::vs_dprintf(3, "Processing event " name " (cur=%d last=%d)\n", \
-                        int(curvalue), int(last.lastvar) ); \
-                    \
-                    if (curvalue != last.lastvar) { \
-                        VSFileSystem::vs_dprintf(2, "Triggering event edge " name " (cur=%d last=%d on=%d)\n", \
-                            int(curvalue), int(last.lastvar), int(triggervalue) ); \
-                        last.lastvar = curvalue; \
-                        if (curvalue == triggervalue) \
-                            sound->play(); \
-                        else \
-                            sound->stop(); \
-                    } \
+            #define MODAL_TRIGGER(name, _triggervalue, _curvalue, lastvar)                                                      \
+                do {                                                                                                            \
+                    bool triggervalue = _triggervalue;                                                                          \
+                    bool curvalue = _curvalue;                                                                                  \
+                    BOOST_LOG_TRIVIAL(trace) << boost::format("Processing event " name " (cur=%1% last=%2%)")                   \
+                                                % int(curvalue) % int(last.lastvar);                                            \
+                                                                                                                                \
+                    if (curvalue != last.lastvar) {                                                                             \
+                        BOOST_LOG_TRIVIAL(debug) << boost::format("Triggering event edge " name " (cur=%1% last=%2% on=%3%)")   \
+                                                % int(curvalue) % int(last.lastvar) % int(triggervalue);                        \
+                        last.lastvar = curvalue;                                                                                \
+                        if (curvalue == triggervalue)                                                                           \
+                            sound->play();                                                                                      \
+                        else                                                                                                    \
+                            sound->stop();                                                                                      \
+                    }                                                                                                           \
                 } while(0)
 
             #define MODAL_IMAGE_TRIGGER(image, itrigger, btrigger, lastvar) \
@@ -2507,8 +2534,8 @@ void GameCockpit::Draw()
                         GFXTRUE,
                         GFXTRUE,
                         GFXTRUE,
-                        zfloor+zrange*(j-1)/COCKPITZ_PARTITIONS, 
-                        zfloor+zrange*j/COCKPITZ_PARTITIONS );                                                                                       //cockpit-specific frustrum (with clipping, with frustrum update) 
+                        zfloor+zrange*(j-1)/COCKPITZ_PARTITIONS,
+                        zfloor+zrange*j/COCKPITZ_PARTITIONS );                                                                                       //cockpit-specific frustrum (with clipping, with frustrum update)
                     for (i = 0; i < mesh.size(); ++i)
                         mesh[i]->Draw( FLT_MAX, headtrans.back() );
 
@@ -2746,7 +2773,6 @@ void GameCockpit::Draw()
         static bool drawarrow_on_chasecam =
             XMLSupport::parse_bool( vs_config->getVariable( "graphics", "hud", "draw_arrow_on_chasecam", "true" ) );
         {
-            //printf("view: %i\n",view);
             Unit *parent = NULL;
             if ( drawarrow && ( parent = this->parent.GetUnit() ) ) {
                 Radar::Sensor sensor(parent);
@@ -3525,6 +3551,7 @@ bool GameCockpit::CheckCommAnimation( Unit *un )
 
 bool GameCockpit::IsPaused() const
 {
+    // stephengtuggy 2020-07-21 FIXME - I don't think this is correct
     return (GetElapsedTime() <= 0.001);
 }
 
@@ -3545,11 +3572,11 @@ void GameCockpit::updateRadar(Unit*ship) {
         // radar display is instantiated when we undock.
         switch (ship->GetComputerData().radar.GetBrand())
         {
-        case Unit::Computer::RADARLIM::Brand::BUBBLE:
+        case Computer::RADARLIM::Brand::BUBBLE:
             radarDisplay = Radar::Factory(Radar::Type::BubbleDisplay);
             break;
 
-        case Unit::Computer::RADARLIM::Brand::PLANE:
+        case Computer::RADARLIM::Brand::PLANE:
             radarDisplay = Radar::Factory(Radar::Type::PlaneDisplay);
             break;
 

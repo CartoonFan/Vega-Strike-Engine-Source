@@ -1,3 +1,25 @@
+/**
+ * director_generic.cpp
+ *
+ * Copyright (C) 2020 pyramid3d, Nachum Barcohen, Roy Falk, Stephen G. Tuggy,
+ * and other Vega Strike contributors.
+ *
+ * This file is part of Vega Strike.
+ *
+ * Vega Strike is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * Vega Strike is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with Vega Strike.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
 
 #ifdef HAVE_PYTHON
 #include <boost/version.hpp>
@@ -17,10 +39,8 @@
 #include "mission.h"
 #include "savegame.h"
 #include "gnuhash.h"
+#include "universe.h"
 
-using std::cout;
-using std::cerr;
-using std::endl;
 PYTHON_INIT_INHERIT_GLOBALS( Director, PythonMissionBaseClass );
 
 float getSaveData( int whichcp, const string &key, unsigned int num )
@@ -156,10 +176,10 @@ vector< string > loadStringList( int playernum, const string &mykey )
 {
     if ( playernum < 0 || (unsigned int) playernum >= _Universe->numPlayers() )
         return vector< string > ();
-    
+
     SaveGame *savegame = _Universe->AccessCockpit( playernum )->savegame;
     vector< string >rez;
-        
+
     const vector< string > &ans = savegame->readMissionStringData( mykey );
     if (ans.size() > 0) {
         /* This is the modern way to store string data: as strings */
@@ -195,7 +215,7 @@ const vector< string >& getStringList( int playernum, const string &mykey )
         static const vector<string> empty;
         return empty;
     }
-    
+
     SaveGame *savegame = _Universe->AccessCockpit( playernum )->savegame;
 
     /* Should check old-style string lists, but it would defeat the purpose
@@ -210,11 +230,11 @@ void saveStringList( int playernum, const string &mykey, const vector< string > 
         return;
 
     SaveGame *savegame = _Universe->AccessCockpit( playernum )->savegame;
-    
+
     // Erase old-style string lists
     if (savegame->getMissionDataLength(mykey) != 0)
         clearSaveData(playernum, mykey);
-    
+
     vector< string > &ans = savegame->getMissionStringData( mykey );
     clearSaveString(playernum, mykey);
     for (vector<string>::const_iterator i = names.begin(); i != names.end(); ++i) {
@@ -227,9 +247,9 @@ void saveDataList( int whichcp, const string &key, const vector< float > &values
 {
     if ( whichcp < 0 || (unsigned int) whichcp >= _Universe->numPlayers() )
         return;
-    
+
     clearSaveData(whichcp, key);
-    
+
     vector< float > &ans = _Universe->AccessCockpit( whichcp )->savegame->getMissionData( key );
     for (vector<float>::const_iterator i = values.begin(); i != values.end(); ++i) {
 
@@ -307,6 +327,11 @@ static void saveStringListPy( int playernum, string mykey, vector< string > name
     saveStringList(playernum, mykey, names);
 }
 
+static bool isUtf8SaveGamePy( string savegame )
+{
+    return isUtf8SaveGame(savegame);
+}
+
 
 PYTHON_BEGIN_MODULE( Director )
 PYTHON_BEGIN_INHERIT_CLASS( Director, pythonMission, PythonMissionBaseClass, "Mission" )
@@ -328,6 +353,7 @@ PYTHON_DEFINE_GLOBAL( Director, &eraseSaveStringPy, "eraseSaveString" );
 PYTHON_DEFINE_GLOBAL( Director, &clearSaveStringPy, "clearSaveString" );
 PYTHON_DEFINE_GLOBAL( Director, &loadStringListPy, "loadStringList" );
 PYTHON_DEFINE_GLOBAL( Director, &saveStringListPy, "saveStringList" );
+PYTHON_DEFINE_GLOBAL( Director, &isUtf8SaveGamePy, "isUtf8SaveGame" );
 PYTHON_END_MODULE( Director )
 
 void InitDirector()
@@ -348,7 +374,7 @@ void Mission::loadModule( string modulename )
 
     debug( 3, node, SCRIPT_PARSE, "loading module "+modulename );
 
-    cout<<"  loading module "<<modulename<<endl;
+    BOOST_LOG_TRIVIAL(trace) << "  loading module " << modulename;
 
     string filename = "modules/"+modulename+".module";
     missionNode *import_top = importf->LoadXML( filename.c_str() );
@@ -428,7 +454,7 @@ void Mission::UnPickle( string pickled )
 
 void Mission::DirectorStart( missionNode *node )
 {
-    cout<<"DIRECTOR START"<<endl;
+    BOOST_LOG_TRIVIAL(trace) << "DIRECTOR START";
 
     static int  st_debuglevel = atoi( vs_config->getVariable( "interpreter", "debuglevel", "0" ).c_str() );
     static bool st_start_game = XMLSupport::parse_bool( vs_config->getVariable( "interpreter", "startgame", "true" ) );
@@ -456,7 +482,7 @@ void Mission::DirectorStart( missionNode *node )
     if ( !doparse.empty() )
         if (XMLSupport::parse_bool( doparse ) == false)
             return;
-    cout<<"parsing declarations for director"<<endl;
+    BOOST_LOG_TRIVIAL(trace) << "parsing declarations for director";
 
     parsemode = PARSE_DECL;
 
@@ -475,7 +501,7 @@ void Mission::DirectorStart( missionNode *node )
         string mname = (*iter).first;
         missionNode *mnode = (*iter).second;
         if (mname != "director") {
-            cout<<"  parsing full module "<<mname<<endl;
+            BOOST_LOG_TRIVIAL(trace) << "  parsing full module " << mname;
             doModule( mnode, SCRIPT_PARSE );
         }
     }

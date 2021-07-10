@@ -29,7 +29,7 @@
 #include "gfx/technique.h"
 #include "gfx/occlusion.h"
 
-#include "unit_factory.h"
+
 
 #include "gfx/sprite.h"
 #include "lin_time.h"
@@ -61,8 +61,8 @@
 #include "unit_click.h"
 #include "options.h"
 
-
-
+#include "weapon_info.h"
+#include "mount_size.h"
 
 using std::vector;
 using std::string;
@@ -82,19 +82,19 @@ extern bool   cam_setup_phase;
 /**** MOVED FROM BASE_INTERFACE.CPP ****/
 extern string getCargoUnitName( const char *name );
 
-template < class UnitType >GameUnit< UnitType >::GameUnit( int ) : sparkle_accum( 0 )
+GameUnit::GameUnit( int ) : sparkle_accum( 0 )
     , phalos( new HaloSystem() )
 {
     this->Unit::Init();
 }
 
-template < class UnitType >GameUnit< UnitType >::GameUnit( std::vector< Mesh* > &meshes, bool SubU, int fact ) :
-    UnitType( meshes, SubU, fact )
+GameUnit::GameUnit( std::vector< Mesh* > &meshes, bool SubU, int fact ) :
+    Unit( meshes, SubU, fact )
     , sparkle_accum( 0 )
     , phalos( new HaloSystem() )
 {}
 
-template < class UnitType >GameUnit< UnitType >::GameUnit( const char *filename,
+GameUnit::GameUnit( const char *filename,
                                                            bool SubU,
                                                            int faction,
                                                            std::string unitModifications,
@@ -106,26 +106,28 @@ template < class UnitType >GameUnit< UnitType >::GameUnit( const char *filename,
     Unit::Init( filename, SubU, faction, unitModifications, flightgrp, fg_subnumber, netxml );
 }
 
-template < class UnitType >GameUnit< UnitType >::~GameUnit()
+GameUnit::~GameUnit()
 {
     for (unsigned int meshcount = 0; meshcount < this->meshdata.size(); meshcount++)
-        if (this->meshdata[meshcount])
+        if (this->meshdata[meshcount]) {
             delete this->meshdata[meshcount];
+            this->meshdata[meshcount] = nullptr;
+        }
     this->meshdata.clear();
     //delete phalos;
 }
 
-/*template < class UnitType >
-unsigned int GameUnit< UnitType >::nummesh() const {
+/*
+unsigned int GameUnit::nummesh() const {
     // return number of meshes but not the shield
     return (this->meshdata.size() - 1 );
 }*/
 
-template < class UnitType >
-void GameUnit< UnitType >::UpgradeInterface( Unit *baseun )
+
+void GameUnit::UpgradeInterface( Unit *baseun )
 {
     string basename = ( ::getCargoUnitName( baseun->getFullname().c_str() ) );
-    if (baseun->isUnit() != PLANETPTR)
+    if (baseun->isUnit() != _UnitType::planet)
         basename = baseun->name;
     BaseUtil::LoadBaseInterfaceAtDock( basename, baseun, this );
 }
@@ -140,14 +142,14 @@ inline static float perspectiveFactor( float d )
         return 1.0f;
 }
 
-template < class UnitType >
-VSSprite*GameUnit< UnitType >::getHudImage() const
+
+VSSprite*GameUnit::getHudImage() const
 {
     return this->pImage->pHudImage;
 }
 
-template < class UnitType >
-void GameUnit< UnitType >::addHalo( const char *filename,
+
+void GameUnit::addHalo( const char *filename,
                                     const Matrix &trans,
                                     const Vector &size,
                                     const GFXColor &col,
@@ -157,14 +159,14 @@ void GameUnit< UnitType >::addHalo( const char *filename,
     phalos->AddHalo( filename, trans, size, col, halo_type, halo_speed );
 }
 
-template < class UnitType >
-void GameUnit< UnitType >::Cloak( bool engage )
+
+void GameUnit::Cloak( bool engage )
 {
-    UnitType::Cloak( engage );         //client side unit
+    Unit::Cloak( engage );         //client side unit
 }
 
-template < class UnitType >
-bool GameUnit< UnitType >::queryFrustum( double frustum[6][4] ) const
+
+bool GameUnit::queryFrustum( double frustum[6][4] ) const
 {
     unsigned int    i;
 #ifdef VARIABLE_LENGTH_PQR
@@ -188,13 +190,13 @@ bool GameUnit< UnitType >::queryFrustum( double frustum[6][4] ) const
     }
     const Unit *un;
     for (un_fkiter iter = this->SubUnits.constFastIterator(); (un = *iter); ++iter)
-        if ( ( (GameUnit< UnitType >*)un )->queryFrustum( frustum ) )
+        if ( ( (GameUnit*)un )->queryFrustum( frustum ) )
             return true;
     return false;
 }
 
-template < class UnitType >
-void GameUnit< UnitType >::UpdateHudMatrix( int whichcam )
+
+void GameUnit::UpdateHudMatrix( int whichcam )
 {
     Matrix m;
     Matrix ctm = this->cumulative_transformation_matrix;
@@ -209,11 +211,10 @@ void GameUnit< UnitType >::UpdateHudMatrix( int whichcam )
                                                      this->GetWarpVelocity(), this->GetAngularVelocity(), this->GetAcceleration() );
 }
 
-extern bool flickerDamage( Unit *un, float hullpercent );
 extern int cloakVal( int cloakint, int cloakminint, int cloakrateint, bool cloakglass ); //short fix?
 
-template < class UnitType >
-void GameUnit< UnitType >::DrawNow( const Matrix &mato, float lod )
+
+void GameUnit::DrawNow( const Matrix &mato, float lod )
 {
     static const void *rootunit = NULL;
     if (rootunit == NULL) rootunit = (const void*) this;
@@ -240,7 +241,7 @@ void GameUnit< UnitType >::DrawNow( const Matrix &mato, float lod )
     }
     int cloak = this->cloaking;
     if (this->cloaking > this->cloakmin)
-        cloak = cloakVal( cloak, this->cloakmin, this->pImage->cloakrate, this->pImage->cloakglass );
+        cloak = cloakVal( cloak, this->cloakmin, this->cloakrate, this->cloakglass );
     for (i = 0; i <= this->nummesh(); i++) {
         //NOTE LESS THAN OR EQUALS...to cover shield mesh
         if (this->meshdata[i] == NULL)
@@ -272,7 +273,7 @@ void GameUnit< UnitType >::DrawNow( const Matrix &mato, float lod )
     if (cmas == 0)
         cmas = 1;
         Vector Scale( 1, 1, 1 );         //Now, HaloSystem handles that
-    int    nummounts = this->GetNumMounts();
+    int    nummounts = this->getNumMounts();
     Matrix wmat = this->WarpMatrix( mat );
     for (i = 0; (int) i < nummounts; i++) {
         Mount *mahnt = &this->mounts[i];
@@ -310,7 +311,7 @@ void GameUnit< UnitType >::DrawNow( const Matrix &mato, float lod )
     Vector angaccel = this->GetAngularAcceleration();
     float  maxaccel = this->GetMaxAccelerationInDirectionOf( mat.getR(), true );
     Vector velocity = this->GetVelocity();
-    if ( !( this->docked & (UnitType::DOCKED | UnitType::DOCKED_INSIDE) ) )
+    if ( !( this->docked & (DOCKED | DOCKED_INSIDE) ) )
         phalos->Draw( mat, Scale, cloak, 0, this->GetHullPercent(), velocity, linaccel, angaccel, maxaccel, cmas, this->faction );
     if (rootunit == (const void*) this) {
         Mesh::ProcessZFarMeshes();
@@ -319,16 +320,16 @@ void GameUnit< UnitType >::DrawNow( const Matrix &mato, float lod )
     }
 }
 
-template < class UnitType >
-void GameUnit< UnitType >::DrawNow()
+
+void GameUnit::DrawNow()
 {
     DrawNow( identity_matrix, 1000000000 );
 }
 
-extern double calc_blend_factor( double frac, int priority, int when_it_will_be_simulated, int cur_simulation_frame );
+extern double calc_blend_factor( double frac, unsigned int priority, unsigned int when_it_will_be_simulated, unsigned int cur_simulation_frame );
 
-template < class UnitType >
-void GameUnit< UnitType >::Draw( const Transformation &parent, const Matrix &parentMatrix )
+
+void GameUnit::Draw( const Transformation &parent, const Matrix &parentMatrix )
 {
     //Quick shortcut for camera setup phase
     bool myparent = ( this == _Universe->AccessCockpit()->GetParent() );
@@ -381,8 +382,8 @@ void GameUnit< UnitType >::Draw( const Transformation &parent, const Matrix &par
     if (!cam_setup_phase) {
         // Following stuff is only needed in actual drawing phase
         if (this->cloaking > this->cloakmin) {
-            cloak = (int) (this->cloaking-interpolation_blend_factor*this->pImage->cloakrate*SIMULATION_ATOM);
-            cloak = cloakVal( cloak, this->cloakmin, this->pImage->cloakrate, this->pImage->cloakglass );
+            cloak = (int) (this->cloaking-interpolation_blend_factor*this->cloakrate * simulation_atom_var );
+            cloak = cloakVal( cloak, this->cloakmin, this->cloakrate, this->cloakglass );
         }
         if (this->hull < this->maxhull) {
             damagelevel = this->hull/this->maxhull;
@@ -392,13 +393,13 @@ void GameUnit< UnitType >::Draw( const Transformation &parent, const Matrix &par
         wmat = this->WarpMatrix( *ctm );
     }
 
-    if ( ( !(this->invisible&UnitType::INVISUNIT) ) && ( ( !(this->invisible&UnitType::INVISCAMERA) ) || (!myparent) ) ) {
+    if ( ( !(this->invisible&INVISUNIT) ) && ( ( !(this->invisible&INVISCAMERA) ) || (!myparent) ) ) {
         if (!cam_setup_phase) {
             Camera *camera = _Universe->AccessCamera();
             QVector camerapos = camera->GetPosition();
 
             float minmeshradius =
-                ( camera->GetVelocity().Magnitude()+this->Velocity.Magnitude() )*SIMULATION_ATOM;
+                ( camera->GetVelocity().Magnitude()+this->Velocity.Magnitude() ) * simulation_atom_var;
 
             unsigned int numKeyFrames = this->graphicOptions.NumAnimationPoints;
             for (i = 0, n = this->nummesh(); i <= n; i++) {
@@ -408,10 +409,10 @@ void GameUnit< UnitType >::Draw( const Transformation &parent, const Matrix &par
                 if (  i == n && (this->meshdata[i]->numFX() == 0 || this->hull < 0) )
                     continue;
                 if (this->meshdata[i]->getBlendDst() == ONE) {
-                    if ( (this->invisible & UnitType::INVISGLOW) != 0 )
+                    if ( (this->invisible & INVISGLOW) != 0 )
                         continue;
                     if (damagelevel < .9)
-                        if ( flickerDamage( this, damagelevel ) )
+                        if ( flickerDamage() )
                             continue;
                 }
                 QVector TransformedPosition = Transform( *ctm, this->meshdata[i]->Position().Cast() );
@@ -424,7 +425,7 @@ void GameUnit< UnitType >::Draw( const Transformation &parent, const Matrix &par
                     (rd < g_game.znear) ? g_game.znear : rd );
                 float lod = pixradius*g_game.detaillevel;
                 if (this->meshdata[i]->getBlendDst() == ZERO) {
-                    if (UnitType::isUnit() == PLANETPTR && pixradius > 10) {
+                    if (isUnit() == _UnitType::planet && pixradius > 10) {
                         Occlusion::addOccluder(TransformedPosition, mSize, true);
                     } else if (pixradius >= 10.0) {
                         Occlusion::addOccluder(TransformedPosition, mSize, false);
@@ -470,16 +471,22 @@ void GameUnit< UnitType >::Draw( const Transformation &parent, const Matrix &par
             double backup = interpolation_blend_factor;
             int    cur_sim_frame = _Universe->activeStarSystem()->getCurrentSimFrame();
             for (un_iter iter = this->getSubUnits(); (un = *iter); ++iter) {
-                float backup = SIMULATION_ATOM;
-                if (this->sim_atom_multiplier && un->sim_atom_multiplier)
-                    SIMULATION_ATOM = SIMULATION_ATOM*un->sim_atom_multiplier/this->sim_atom_multiplier;
+                float sim_atom_backup = simulation_atom_var;
+                /*if (sim_atom_backup != SIMULATION_ATOM) {
+                    BOOST_LOG_TRIVIAL(debug) << boost::format("void GameUnit::Draw( const Transformation &parent, const Matrix &parentMatrix ): sim_atom as backed up != SIMULATION_ATOM: %1%") % sim_atom_backup;
+                }*/
+                if (this->sim_atom_multiplier && un->sim_atom_multiplier) {
+                    //BOOST_LOG_TRIVIAL(trace) << boost::format("void GameUnit::Draw( const Transformation &parent, const Matrix &parentMatrix ): simulation_atom_var as backed up  = %1%") % simulation_atom_var;
+                    simulation_atom_var = simulation_atom_var * un->sim_atom_multiplier / this->sim_atom_multiplier;
+                    //BOOST_LOG_TRIVIAL(trace) << boost::format("void GameUnit::Draw( const Transformation &parent, const Matrix &parentMatrix ): simulation_atom_var as multiplied = %1%") % simulation_atom_var;
+                }
                 interpolation_blend_factor = calc_blend_factor( saved_interpolation_blend_factor,
                                                                 un->sim_atom_multiplier,
                                                                 un->cur_sim_queue_slot,
                                                                 cur_sim_frame );
                 (un)->Draw( *ct, *ctm );
 
-                SIMULATION_ATOM = backup;
+                simulation_atom_var = sim_atom_backup;
             }
             interpolation_blend_factor = backup;
         }
@@ -503,7 +510,7 @@ void GameUnit< UnitType >::Draw( const Transformation &parent, const Matrix &par
      *  delete tmpiter;
      **/
     if (cam_setup_phase) return;
-    int nummounts = this->GetNumMounts();
+    int nummounts = this->getNumMounts();
     for (i = 0; (int) i < nummounts; i++) {
         Mount *mahnt = &this->mounts[i];
         if (game_options.draw_weapons && On_Screen)
@@ -543,15 +550,15 @@ void GameUnit< UnitType >::Draw( const Transformation &parent, const Matrix &par
                     }
                 }
             }
-        if (this->mounts[i].type->type == weapon_info::BEAM)
+        if (this->mounts[i].type->type == WEAPON_TYPE::BEAM)
             if (this->mounts[i].ref.gun)
                 this->mounts[i].ref.gun->Draw( *ct, wmat,
-                                               ( (this->mounts[i].size&weapon_info::AUTOTRACKING)
+                                               ( isAutoTrackingMount(this->mounts[i].size)
                                                 && (this->mounts[i].time_to_lock <= 0)
                                                 && Unit::TargetTracked() ) ? Unit::Target() : NULL,
                                                this->computer.radar.trackingcone );
     }
-    if ( On_Screen && (phalos->NumHalos() > 0) && !( this->docked&(UnitType::DOCKED|UnitType::DOCKED_INSIDE) ) && (Apparent_Size > 5.0f) ) {
+    if ( On_Screen && (phalos->NumHalos() > 0) && !( this->docked&(DOCKED|DOCKED_INSIDE) ) && (Apparent_Size > 5.0f) ) {
         Vector linaccel = this->GetAcceleration();
         Vector angaccel = this->GetAngularAcceleration();
         float  maxaccel = this->GetMaxAccelerationInDirectionOf( wmat.getR(), true );
@@ -567,8 +574,8 @@ void GameUnit< UnitType >::Draw( const Transformation &parent, const Matrix &par
         float hulld = this->GetHull() > 0 ? damagelevel : 1.0;
         phalos->Draw( wmat, Scale, cloak, nebd, hulld, velocity, linaccel, angaccel, maxaccel, cmas, this->faction );
     }
-    if ( On_Screen && !UnitType::graphicOptions.NoDamageParticles
-        && !( this->docked&(UnitType::DOCKED|UnitType::DOCKED_INSIDE) ) ) {
+    if ( On_Screen && !graphicOptions.NoDamageParticles
+        && !( this->docked&(DOCKED|DOCKED_INSIDE) ) ) {
         if (damagelevel < .99 && this->nummesh() > 0 && this->GetHull() > 0) {
             unsigned int switcher    = (damagelevel > .8) ? 1
                                        : (damagelevel > .6) ? 2 : (damagelevel > .4) ? 3 : (damagelevel > .2) ? 4 : 5;
@@ -598,14 +605,14 @@ void GameUnit< UnitType >::Draw( const Transformation &parent, const Matrix &par
     }
 }
 
-template < class UnitType >
-void GameUnit< UnitType >::Draw( const Transformation &quat )
+
+void GameUnit::Draw( const Transformation &quat )
 {
     Draw( quat, identity_matrix );
 }
 
-template < class UnitType >
-void GameUnit< UnitType >::Draw()
+
+void GameUnit::Draw()
 {
     Draw( identity_transformation, identity_matrix );
 }
@@ -637,8 +644,8 @@ static void parseFloat4( const std::string &s, float value[4] )
     }
 }
 
-template < class UnitType >
-void GameUnit< UnitType >::applyTechniqueOverrides(const map<string, string> &overrides)
+
+void GameUnit::applyTechniqueOverrides(const map<string, string> &overrides)
 {
     for (vector<Mesh*>::iterator mesh = this->meshdata.begin(); mesh != this->meshdata.end(); ++mesh) {
         if (*mesh != NULL) {
@@ -647,7 +654,7 @@ void GameUnit< UnitType >::applyTechniqueOverrides(const map<string, string> &ov
             if (technique.get() != NULL) {
                 bool doOverride = false;
                 for (int passno = 0; !doOverride && passno < technique->getNumPasses(); ++passno) {
-                    const Technique::Pass &pass = technique->getPass(passno);
+                    const Pass &pass = technique->getPass(passno);
                     for (size_t paramno = 0; !doOverride && paramno < pass.getNumShaderParams(); ++paramno) {
                         if (overrides.count(pass.getShaderParam(paramno).name) > 0)
                             doOverride = true;
@@ -660,9 +667,9 @@ void GameUnit< UnitType >::applyTechniqueOverrides(const map<string, string> &ov
                     // parameter values don't really need recompilation)
                     TechniquePtr newtechnique = TechniquePtr(new Technique(*technique));
                     for (int passno = 0; passno < technique->getNumPasses(); ++passno) {
-                        Technique::Pass &pass = technique->getPass(passno);
+                        Pass &pass = technique->getPass(passno);
                         for (size_t paramno = 0; paramno < pass.getNumShaderParams(); ++paramno) {
-                            Technique::Pass::ShaderParam &param = pass.getShaderParam(paramno);
+                            Pass::ShaderParam &param = pass.getShaderParam(paramno);
                             map<string, string>::const_iterator override = overrides.find(param.name);
                             if (override != overrides.end())
                                 parseFloat4(override->second, param.value);
@@ -676,8 +683,8 @@ void GameUnit< UnitType >::applyTechniqueOverrides(const map<string, string> &ov
     }
 }
 
-template < class UnitType >
-Matrix GameUnit< UnitType >::WarpMatrix( const Matrix &ctm ) const
+
+Matrix GameUnit::WarpMatrix( const Matrix &ctm ) const
 {
     if ( this->GetWarpVelocity().MagnitudeSquared() < (game_options.warp_stretch_cutoff * game_options.warp_stretch_cutoff * game_options.game_speed * game_options.game_speed )
         || (game_options.only_stretch_in_warp && this->graphicOptions.InWarp == 0) ) {
@@ -702,16 +709,16 @@ Matrix GameUnit< UnitType >::WarpMatrix( const Matrix &ctm ) const
 using Orders::FireAt;
 
 #if 0
-template < class UnitType >
-void GameUnit< UnitType >::SwapOutHalos()
+
+void GameUnit::SwapOutHalos()
 {
     for (int i = 0; i < numhalos; i++)
         //float x,y;
         //halos[i]->GetDimensions (x,y);    //halos[i]->SetDimensions (x/(1024),y/(1024));
         halos[i]->Draw( cumulative_transformation, cumulative_transformation_matrix, 0 );
 }
-template < class UnitType >
-void GameUnit< UnitType >::SwapInHalos()
+
+void GameUnit::SwapInHalos()
 {
     for (int i = 0; i < numhalos; i++) {
         //float x,y;
@@ -720,30 +727,3 @@ void GameUnit< UnitType >::SwapInHalos()
     }
 }
 #endif
-
-/////////////////////////////////////////////////////
-//explicit instantiations, added by chuck_starchaser:
-
-
- #include "cmd/asteroid_generic.h"
-template class GameUnit< Asteroid >;
-
- #include "cmd/building_generic.h"
-template class GameUnit< Building >;
-
- #include "cmd/planet_generic.h"
-template class GameUnit< Planet >;
-
- #include "cmd/unit_generic.h"
-template class GameUnit< Unit >;
-
- #include "cmd/missile_generic.h"
-template class GameUnit< Missile >;
-
- #include "cmd/nebula.h"
-template class GameUnit< Nebula >;
-
- #include "cmd/enhancement.h"
-template class GameUnit< Enhancement >;
-
-/////////////////////////////////////////////////////

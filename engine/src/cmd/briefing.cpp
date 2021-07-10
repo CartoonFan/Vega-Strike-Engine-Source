@@ -1,14 +1,15 @@
 #include "briefing.h"
 #include "unit_generic.h"
-#include "unit_factory.h"
+#include "unit.h"
 #include "gfx/mesh.h"
 #include "script/mission.h"
 #include "gfx/ani_texture.h"
 #include "gfx/matrix.h"
+#include "universe.h"
 Briefing::Ship::Ship( const char *filename, int faction, const Vector &position )
 {
     VSCONSTRUCT2( 's' )
-    Unit*tmp = UnitFactory::createUnit( filename, true, faction );
+    Unit*tmp = new GameUnit( filename, true, faction );
     meshdata = tmp->StealMeshes();
     tmp->Kill();
     cloak    = 1;
@@ -24,8 +25,8 @@ bool UpdatePosition( Vector &res, Vector cur, Vector fin, float speed )
     Vector direction( fin-cur );
     float  dirmag = direction.Magnitude();
     bool   ret    = true;
-    if (dirmag > 0 && dirmag > speed*SIMULATION_ATOM) {
-        direction = direction*(speed*SIMULATION_ATOM/dirmag);
+    if (dirmag > 0 && dirmag > speed*simulation_atom_var) {
+        direction = direction*(speed*simulation_atom_var/dirmag);
         ret = false;
     }
     res = direction+cur;
@@ -182,7 +183,7 @@ void Briefing::Ship::OverrideOrder( const Vector &destination, float time )
 void Briefing::Ship::EnqueueOrder( const Vector &destination, float time )
 {
     if (time < .00001)
-        time = SIMULATION_ATOM;
+        time = SIMULATION_ATOM; // simulation_atom_var?
     orders.push_back( BriefingOrder( destination, ( destination-Position() ).Magnitude()/time ) );
 }
 

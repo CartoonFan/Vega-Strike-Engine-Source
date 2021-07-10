@@ -1,22 +1,27 @@
-/*
- * Vega Strike
+/**
+ * director.cpp
+ *
  * Copyright (C) 2001-2002 Daniel Horn
+ * Copyright (C) Alexander Rawass
+ * Copyright (C) 2020 Stephen G. Tuggy, pyramid3d, and other Vega Strike
+ * contributors
  *
- * http://vegastrike.sourceforge.net/
+ * https://github.com/vegastrike/Vega-Strike-Engine-Source
  *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
+ * This file is part of Vega Strike.
  *
- * This program is distributed in the hope that it will be useful,
+ * Vega Strike is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * Vega Strike is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+ * along with Vega Strike.  If not, see <https://www.gnu.org/licenses/>.
  */
 
 /*
@@ -71,9 +76,12 @@ void Mission::DirectorLoop()
 {
     double oldgametime = gametime;
     gametime += SIMULATION_ATOM;     //elapsed;
+    //BOOST_LOG_TRIVIAL(trace) << boost::format("void Mission::DirectorLoop(): oldgametime = %1$.6f; SIMULATION_ATOM = %2$.6f; gametime = %3$.6f") % oldgametime % SIMULATION_ATOM % gametime;
     if (getTimeCompression() >= .1)
-        if (gametime <= oldgametime)
+        if (gametime <= oldgametime) {
+            BOOST_LOG_TRIVIAL(warning) << "void Mission::DirectorLoop(): gametime is before oldgametime!";
             gametime = SIMULATION_ATOM;
+        }
     try {
         BriefingLoop();
         if (runtime.pymissions)
@@ -81,10 +89,10 @@ void Mission::DirectorLoop()
     }
     catch (...) {
         if ( PyErr_Occurred() ) {
+            BOOST_LOG_TRIVIAL(fatal) << "void Mission::DirectorLoop(): Python error occurred";
             PyErr_Print();
             PyErr_Clear();
-            fflush( stderr );
-            fflush( stdout );
+            VSFileSystem::flushLogs();
         } throw;
     }
 }
@@ -98,12 +106,12 @@ void Mission::DirectorEnd()
 void Mission::DirectorShipDestroyed( Unit *unit )
 {
     Flightgroup *fg = unit->getFlightgroup();
-    if (fg == NULL) {
-        printf( "ship destroyed-no flightgroup\n" );
+    if (fg == nullptr) {
+        BOOST_LOG_TRIVIAL(info) << "ship destroyed-no flightgroup";
         return;
     }
     if (fg->nr_ships_left <= 0 && fg->nr_waves_left > 0) {
-        printf( "WARNING: nr_ships_left<=0\n" );
+        BOOST_LOG_TRIVIAL(info) << "WARNING: nr_ships_left<=0";
         return;
     }
     fg->nr_ships_left -= 1;
@@ -140,7 +148,7 @@ void Mission::DirectorShipDestroyed( Unit *unit )
             cf.waves    = fg->nr_waves_left;
             cf.nr_ships = fg->nr_ships;
 
-            call_unit_launch( &cf, UNITPTR, string( "" ) );
+            call_unit_launch( &cf, _UnitType::unit, string( "" ) );
         } else {
             mission->msgcenter->add( "game", "all", "Flightgroup "+fg->name+" destroyed" );
         }
@@ -203,8 +211,9 @@ void Mission::DirectorBenchmark()
 {
     total_nr_frames++;
     if (benchmark > 0.0 && benchmark < gametime) {
-        std::cout<<"Game was running for "<<gametime<<" secs,   av. framerate "<<( (double) total_nr_frames )/gametime
+        BOOST_LOG_TRIVIAL(trace) << "Game was running for "<<gametime<<" secs,   av. framerate "<<( (double) total_nr_frames )/gametime
                  <<std::endl;
+        VSFileSystem::flushLogs();
         winsys_exit( 0 );
     }
 }

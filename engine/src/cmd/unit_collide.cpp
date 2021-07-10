@@ -21,6 +21,9 @@
 #include "collide.h"
 #include "vsfilesystem.h"
 
+#include "collision.h"
+#include "universe.h"
+
 static bool operator==( const Collidable &a, const Collidable &b )
 {
     return memcmp( &a, &b, sizeof (Collidable) ) == 0;
@@ -31,7 +34,7 @@ void Unit::RemoveFromSystem()
     for (unsigned int locind = 0; locind < NUM_COLLIDE_MAPS; ++locind)
         if ( !is_null( this->location[locind] ) ) {
             if (activeStarSystem == NULL) {
-                printf( "NONFATAL NULL activeStarSystem detected...please fix\n" );
+                BOOST_LOG_TRIVIAL(error) << "NONFATAL NULL activeStarSystem detected...please fix";
                 activeStarSystem = _Universe->activeStarSystem();
             }
             static bool collidemap_sanity_check =
@@ -39,40 +42,39 @@ void Unit::RemoveFromSystem()
             if (collidemap_sanity_check) {
                 if (0) {
                     CollideMap::iterator i;
-                    CollideMap::iterator j = activeStarSystem->collidemap[locind]->begin();
+                    CollideMap::iterator j = activeStarSystem->collide_map[locind]->begin();
 
                     bool found = false;
-                    for (i = activeStarSystem->collidemap[locind]->begin();
-                         i != activeStarSystem->collidemap[locind]->end(); ++i) {
+                    for (i = activeStarSystem->collide_map[locind]->begin();
+                         i != activeStarSystem->collide_map[locind]->end(); ++i) {
                         if (i == this->location[locind]) {
-                            printf( "hussah %d\n", *i == *this->location[locind] );
+                            BOOST_LOG_TRIVIAL(info) << boost::format("hussah %1$b") % (*i == *this->location[locind]);
                             found = true;
                         }
                         if (**i < **j) {
-                            printf( "(%f %f %f) and (%f %f %f) %f < %f %d!!!",
-                                   (**i).GetPosition().i,
-                                   (**i).GetPosition().j,
-                                   (**i).GetPosition().k,
-                                   (**j).GetPosition().i,
-                                   (**j).GetPosition().j,
-                                   (**j).GetPosition().k,
-                                   (**i).GetPosition().MagnitudeSquared(),
-                                   (**j).GetPosition().MagnitudeSquared(),
-                                   (**i).GetPosition().MagnitudeSquared()
-                                   < (**j).GetPosition().MagnitudeSquared() );
+                            BOOST_LOG_TRIVIAL(warning) << boost::format("(%1$f %2$f %3$f) and (%4$f %5$f %6$f) %7$f < %8$f %9$b!!!")
+                                   % (**i).GetPosition().i
+                                   % (**i).GetPosition().j
+                                   % (**i).GetPosition().k
+                                   % (**j).GetPosition().i
+                                   % (**j).GetPosition().j
+                                   % (**j).GetPosition().k
+                                   % (**i).GetPosition().MagnitudeSquared()
+                                   % (**j).GetPosition().MagnitudeSquared()
+                                   % ((**i).GetPosition().MagnitudeSquared() < (**j).GetPosition().MagnitudeSquared());
                         }
                         j = i;
                     }
-                    printf( "fin %d %d ", *(int*) &i, found );
-                    activeStarSystem->collidemap[locind]->checkSet();
+                    BOOST_LOG_TRIVIAL(info) << boost::format("fin %1$p %2$b ") % (*(int*) &i) % found;
+                    activeStarSystem->collide_map[locind]->checkSet();
                     assert( 0 );
                 }
             }
-            activeStarSystem->collidemap[locind]->erase( this->location[locind] );
+            activeStarSystem->collide_map[locind]->erase( this->location[locind] );
             set_null( this->location[locind] );
         }
-    for (int j = 0; j < GetNumMounts(); ++j)
-        if (mounts[j].type->type == weapon_info::BEAM)
+    for (int j = 0; j < getNumMounts(); ++j)
+        if (mounts[j].type->type == WEAPON_TYPE::BEAM)
             if (mounts[j].ref.gun)
                 mounts[j].ref.gun->RemoveFromSystem( true );
     activeStarSystem = NULL;
@@ -89,7 +91,7 @@ void Unit::UpdateCollideQueue( StarSystem *ss, CollideMap::iterator hint[NUM_COL
         if ( is_null( location[locind] ) ) {
             assert( !isSubUnit() );
             if ( !isSubUnit() )
-                location[locind] = ss->collidemap[locind]->insert( Collidable( this ), hint[locind] );
+                location[locind] = ss->collide_map[locind]->insert( Collidable( this ), hint[locind] );
         }
 }
 
@@ -100,8 +102,8 @@ void Unit::CollideAll()
         return;
     for (unsigned int locind = 0; locind < NUM_COLLIDE_MAPS; ++locind)
         if ( is_null( this->location[locind] ) )
-            this->location[locind] = this->getStarSystem()->collidemap[locind]->insert( Collidable( this ) );
-    CollideMap *cm = this->getStarSystem()->collidemap[Unit::UNIT_BOLT];
+            this->location[locind] = this->getStarSystem()->collide_map[locind]->insert( Collidable( this ) );
+    CollideMap *cm = this->getStarSystem()->collide_map[Unit::UNIT_BOLT];
     cm->CheckCollisions( this, *this->location[Unit::UNIT_BOLT] );
 }
 
@@ -115,12 +117,12 @@ Vector Vabs( const Vector &in )
 //Slated for removal 0.5
 Matrix WarpMatrixForCollisions( Unit *un, const Matrix &ctm )
 {
-    if ( un->GetWarpVelocity().MagnitudeSquared()*SIMULATION_ATOM*SIMULATION_ATOM < un->rSize()*un->rSize() ) {
+    if ( un->GetWarpVelocity().MagnitudeSquared()*simulation_atom_var*simulation_atom_var < un->rSize()*un->rSize() ) {
         return ctm;
     } else {
         Matrix k( ctm );
         const Vector v( Vector( 1, 1, 1 )+Vabs( ctm.getR()*ctm.getR().Dot( un->GetWarpVelocity().Scale(
-                                                                              100*SIMULATION_ATOM/un->rSize() ) ) ) );
+                                                                              100*simulation_atom_var/un->rSize() ) ) ) );
         k.r[0] *= v.i;
         k.r[1] *= v.j;
         k.r[2] *= v.k;
@@ -202,35 +204,35 @@ bool Unit::InsideCollideTree( Unit *smaller,
     }
     un_iter i;
     static float rsizelim = XMLSupport::parse_float( vs_config->getVariable( "physics", "smallest_subunit_to_collide", ".2" ) );
-    clsptr  bigtype = bigasteroid ? ASTEROIDPTR : bigger->isUnit();
-    clsptr  smalltype     = smallasteroid ? ASTEROIDPTR : smaller->isUnit();
+    _UnitType  bigtype = bigasteroid ? _UnitType::asteroid : bigger->isUnit();
+    _UnitType  smalltype     = smallasteroid ? _UnitType::asteroid : smaller->isUnit();
     if ( bigger->SubUnits.empty() == false
-        && (bigger->graphicOptions.RecurseIntoSubUnitsOnCollision == true || bigtype == ASTEROIDPTR) ) {
+        && (bigger->graphicOptions.RecurseIntoSubUnitsOnCollision == true || bigtype == _UnitType::asteroid) ) {
         i = bigger->getSubUnits();
         float rad = smaller->rSize();
         for (Unit *un; (un = *i); ++i) {
             float subrad = un->rSize();
-            if ( (bigtype != ASTEROIDPTR) && (subrad/bigger->rSize() < rsizelim) ) {
+            if ( (bigtype != _UnitType::asteroid) && (subrad/bigger->rSize() < rsizelim) ) {
                 break;
             }
             if ( ( un->Position()-smaller->Position() ).Magnitude() <= subrad+rad ) {
-                if ( ( un->InsideCollideTree( smaller, bigpos, bigNormal, smallpos, smallNormal, bigtype == ASTEROIDPTR,
-                                              smalltype == ASTEROIDPTR ) ) )
+                if ( ( un->InsideCollideTree( smaller, bigpos, bigNormal, smallpos, smallNormal, bigtype == _UnitType::asteroid,
+                                              smalltype == _UnitType::asteroid ) ) )
                     return true;
             }
         }
     }
     if ( smaller->SubUnits.empty() == false
-        && (smaller->graphicOptions.RecurseIntoSubUnitsOnCollision == true || smalltype == ASTEROIDPTR) ) {
+        && (smaller->graphicOptions.RecurseIntoSubUnitsOnCollision == true || smalltype == _UnitType::asteroid) ) {
         i = smaller->getSubUnits();
         float rad = bigger->rSize();
         for (Unit *un; (un = *i); ++i) {
             float subrad = un->rSize();
-            if ( (smalltype != ASTEROIDPTR) && (subrad/smaller->rSize() < rsizelim) )
+            if ( (smalltype != _UnitType::asteroid) && (subrad/smaller->rSize() < rsizelim) )
                 break;
             if ( ( un->Position()-bigger->Position() ).Magnitude() <= subrad+rad ) {
-                if ( ( bigger->InsideCollideTree( un, bigpos, bigNormal, smallpos, smallNormal, bigtype == ASTEROIDPTR,
-                                                  smalltype == ASTEROIDPTR ) ) )
+                if ( ( bigger->InsideCollideTree( un, bigpos, bigNormal, smallpos, smallNormal, bigtype == _UnitType::asteroid,
+                                                  smalltype == _UnitType::asteroid ) ) )
                     return true;
             }
         }
@@ -250,20 +252,20 @@ bool Unit::Collide( Unit *target )
     //now first OF ALL make sure they're within bubbles of each other...
     if ( ( Position()-target->Position() ).MagnitudeSquared() > mysqr( radial_size+target->radial_size ) )
         return false;
-    clsptr targetisUnit = target->isUnit();
-    clsptr thisisUnit   = this->isUnit();
+    _UnitType targetisUnit = target->isUnit();
+    _UnitType thisisUnit   = this->isUnit();
     static float NEBULA_SPACE_DRAG = XMLSupport::parse_float( vs_config->getVariable( "physics", "nebula_space_drag", "0.01" ) );
-    if (targetisUnit == NEBULAPTR)
+    if (targetisUnit == _UnitType::nebula)
         //why? why not?
         this->Velocity *= (1-NEBULA_SPACE_DRAG);
     if ( target == this
-        || ( (targetisUnit != NEBULAPTR
-              && thisisUnit != NEBULAPTR)
+        || ( (targetisUnit != _UnitType::nebula
+              && thisisUnit != _UnitType::nebula)
             && ( owner == target || target->owner == this
                 || (owner != NULL
                     && target->owner == owner) ) ))
         return false;
-    if (targetisUnit == ASTEROIDPTR && thisisUnit == ASTEROIDPTR)
+    if (targetisUnit == _UnitType::asteroid && thisisUnit == _UnitType::asteroid)
         return false;
     std::multimap< Unit*, Unit* > *last_collisions = &_Universe->activeStarSystem()->last_collisions;
     last_collisions->insert( std::pair< Unit*, Unit* > ( this, target ) );
@@ -287,17 +289,20 @@ bool Unit::Collide( Unit *target )
         QVector bigpos, smallpos;
         Vector  bigNormal, smallNormal;
         if ( bigger->InsideCollideTree( smaller, bigpos, bigNormal, smallpos, smallNormal ) ) {
-            if ( !bigger->isDocked( smaller ) && !smaller->isDocked( bigger ) )
-                bigger->reactToCollision( smaller, bigpos, bigNormal, smallpos, smallNormal, 10 );
-            else return false;
+            if ( !bigger->isDocked( smaller ) && !smaller->isDocked( bigger ) ) {
+                //bigger->reactToCollision( smaller, bigpos, bigNormal, smallpos, smallNormal, 10 );
+                Collision::collide(bigger, bigpos, bigNormal, smaller, smallpos, smallNormal, 10);
+            } else return false;
         } else {return false; }
     } else {
         Vector normal( -1, -1, -1 );
         float  dist = 0.0;
         if ( bigger->Inside( smaller->Position(), smaller->rSize(), normal, dist ) ) {
-            if ( !bigger->isDocked( smaller ) && !smaller->isDocked( bigger ) )
-                bigger->reactToCollision( smaller, bigger->Position(), normal, smaller->Position(), -normal, dist );
-            else return false;
+            if ( !bigger->isDocked( smaller ) && !smaller->isDocked( bigger ) ) {
+                //bigger->reactToCollision( smaller, bigger->Position(), normal, smaller->Position(), -normal, dist );
+                Collision::collide(bigger, bigger->Position(), normal, smaller,
+                                            smaller->Position(), -normal, dist);
+            } else return false;
         } else {
             return(false);
         }
@@ -484,7 +489,7 @@ float Unit::querySphereNoRecurse( const QVector &start, const QVector &end, floa
     for (i = 0; i < nummesh(); i++) {
         if ( ( meshdata[i]->Position().Magnitude() > this->rSize() ) || ( meshdata[i]->rSize() > 30+this->rSize() ) )
             continue;
-        if (isUnit() == PLANETPTR && i > 0)
+        if (isUnit() == _UnitType::planet && i > 0)
             break;
         double  a, b, c;
         QVector st  = start-Transform( cumulative_transformation_matrix, meshdata[i]->Position().Cast() );

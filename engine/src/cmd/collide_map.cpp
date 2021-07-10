@@ -1,8 +1,37 @@
+/**
+ * collide_map.cpp
+ *
+ * Copyright (C) Daniel Horn
+ * Copyright (C) 2020 pyramid3d, Stephen G. Tuggy, and other Vega Strike
+ * contributors
+ *
+ * https://github.com/vegastrike/Vega-Strike-Engine-Source
+ *
+ * This file is part of Vega Strike.
+ *
+ * Vega Strike is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * Vega Strike is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with Vega Strike.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+
 #include <algorithm>
 #include <assert.h>
 #include "collide_map.h"
 #include "unit_generic.h"
 #include "bolt.h"
+#include "star_system.h"
+#include "universe.h"
+#include "vsfilesystem.h"
 
 volatile bool apart_return = true;
 void CollideArray::erase( iterator target )
@@ -88,7 +117,7 @@ public: RadiusUpdate( CollideArray *cm )
                 last_radius     = rad;
                 last_radius_key = key;
             } else {last_radius_key = key; }}
-        if (last_big_radius && fabs( key-last_big_radius_key ) > 2*cm->max_bolt_radius*SIMULATION_ATOM) {
+        if (last_big_radius && fabs( key-last_big_radius_key ) > 2*cm->max_bolt_radius*simulation_atom_var) {
             last_big_radius     = last_radius;
             last_big_radius_key = last_radius_key;
             last_radius = 0;
@@ -105,12 +134,12 @@ class UpdateBackpointers
 public:
     void updateBackpointer( Collidable &collidable )
     {
-        StarSystem *ss = _Universe->activeStarSystem();
         assert( collidable.radius != 0.0f );
-        if (location_index != Unit::UNIT_ONLY && collidable.radius < 0)
-            Bolt::BoltFromIndex( ss, collidable.ref )->location = &collidable;
-        else
+        if (location_index != Unit::UNIT_ONLY && collidable.radius < 0) {
+            Bolt::BoltFromIndex( collidable.ref )->location = &collidable;
+        } else {
             collidable.ref.unit->location[location_index] = &collidable;
+        }
     }
     void operator()( Collidable &collidable )
     {
@@ -131,7 +160,7 @@ void CollideArray::flatten()
             sorted[--index] = *tmp;
             collideUpdate( *tmp, index );
         }
-        
+
         std::list< CollidableBackref >::iterator listend = toflattenhints[i].end();
         for (std::list< CollidableBackref >::iterator j = toflattenhints[i].begin();
              j != listend;
@@ -203,15 +232,15 @@ void CollideArray::flatten( CollideArray &hint )
 
         for_each( sorted.begin(), sorted.end(), CopyExample( hint.sorted.begin(), hint.sorted.end() ) );
     } else {
-        printf( "Trying to use flatten hint on a array with both bolts and units\n" );
+        BOOST_LOG_TRIVIAL(info) << "Trying to use flatten hint on a array with both bolts and units";
         flatten();
     }
 }
 
 CollideArray::iterator CollideArray::insert( const Collidable &newKey, iterator hint )
 {
-    if (newKey.radius < -max_bolt_radius*SIMULATION_ATOM)
-        max_bolt_radius = -newKey.radius/SIMULATION_ATOM;
+    if (newKey.radius < -max_bolt_radius*simulation_atom_var)
+        max_bolt_radius = -newKey.radius/simulation_atom_var;
     if ( this->begin() == this->end() ) {
         count += 1;
         this->unsorted.push_back( newKey );
@@ -314,7 +343,7 @@ public:
                             CollideMap::iterator tmptmore = ref.unit->location[Unit::UNIT_ONLY];
                             CollideMap::iterator tmptless = tmptmore;
                             ++tmptmore;
-                            CollideMap *tmpcm = _Universe->activeStarSystem()->collidemap[Unit::UNIT_ONLY];
+                            CollideMap *tmpcm = _Universe->activeStarSystem()->collide_map[Unit::UNIT_ONLY];
                             return CollideChecker< T, false >::CheckCollisionsInner( tmpcm->begin(), tmpcm->end(),
                                                                                      un, collider, Unit::UNIT_ONLY,
                                                                                      tmptless, tmptmore,
@@ -334,7 +363,7 @@ public:
                             CollideMap::iterator tmptmore = ref.unit->location[Unit::UNIT_ONLY];
                             CollideMap::iterator tmptless = tmptmore;
                             ++tmptmore;
-                            CollideMap *tmpcm = _Universe->activeStarSystem()->collidemap[Unit::UNIT_ONLY];
+                            CollideMap *tmpcm = _Universe->activeStarSystem()->collide_map[Unit::UNIT_ONLY];
                             return CollideChecker< T, false >::CheckCollisionsInner( tmpcm->begin(), tmpcm->end(),
                                                                                      un, collider, Unit::UNIT_ONLY,
                                                                                      tmptless, tmptmore,
@@ -363,7 +392,7 @@ public:
                     CollideMap::iterator tmptmore = ref.unit->location[Unit::UNIT_ONLY];
                     CollideMap::iterator tmptless = tmptmore;
                     ++tmptmore;
-                    CollideMap *tmpcm = _Universe->activeStarSystem()->collidemap[Unit::UNIT_ONLY];
+                    CollideMap *tmpcm = _Universe->activeStarSystem()->collide_map[Unit::UNIT_ONLY];
                     return CollideChecker< T, false >::CheckCollisionsInner( tmpcm->begin(), tmpcm->end(),
                                                                              un, collider, Unit::UNIT_ONLY,
                                                                              tmptless, tmptmore,

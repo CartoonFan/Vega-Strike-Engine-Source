@@ -1,11 +1,35 @@
+/**
+ * universe_util_generic.cpp
+ *
+ * Copyright (C) Daniel Horn
+ * Copyright (C) 2020 pyramid3d, Stephen G. Tuggy, and other Vega Strike
+ * contributors
+ *
+ * https://github.com/vegastrike/Vega-Strike-Engine-Source
+ *
+ * This file is part of Vega Strike.
+ *
+ * Vega Strike is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * Vega Strike is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with Vega Strike.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+
 #include <math.h>
 #include <sys/stat.h>
 #include "lin_time.h"
 #include "cmd/script/mission.h"
 #include "universe_util.h"
-#include "universe_generic.h"
 #include "cmd/unit_generic.h"
-#include "cmd/unit_factory.h"    //for UnitFactory::getMasterPartList()
 #include "cmd/collection.h"
 #include "star_system_generic.h"
 #include <string>
@@ -24,10 +48,14 @@
 #include "linecollide.h"
 #include "cmd/unit_collide.h"
 #include "cmd/unit_find.h"
+#include "unit.h"
 
 #include "python/init.h"
 #include <Python.h>
 #include "options.h"
+
+#include "star_system.h"
+#include "universe.h"
 
 #include <iostream>
 
@@ -35,9 +63,6 @@ extern Unit& GetUnitMasterPartList();
 extern int num_delayed_missions();
 using std::string;
 using std::set;
-using std::cout;
-using std::cerr;
-using std::endl;
 
 //less to write
 #define activeSys _Universe->activeStarSystem()
@@ -139,13 +164,13 @@ Unit * launchJumppoint( string name_string,
                         string squadlogo,
                         string destinations )
 {
-    int clstype = UNITPTR;
+    int clstype = _UnitType::unit;
     if (unittype_string == "planet")
-        clstype = PLANETPTR;
+        clstype = _UnitType::planet;
     else if (unittype_string == "asteroid")
-        clstype = ASTEROIDPTR;
+        clstype = _UnitType::asteroid;
     else if (unittype_string == "nebula")
-        clstype = NEBULAPTR;
+        clstype = _UnitType::nebula;
     CreateFlightgroup cf;
     cf.fg = Flightgroup::newFlightgroup( name_string,
                                          type_string,
@@ -198,9 +223,10 @@ Cargo getRandCargo( int quantity, string category )
         return newret;
     }
 }
+
 float GetGameTime()
 {
-    return mission->gametime;
+    return mission->getGametime();
 }
 
 float getStarTime()
@@ -222,7 +248,7 @@ static QVector scratch_vector;
 
 Unit * GetMasterPartList()
 {
-    return UnitFactory::getMasterPartList();
+    return getMasterPartList();
 }
 Unit * getScratchUnit()
 {
@@ -421,7 +447,7 @@ Unit * getUnitByPtr( void *ptr, Unit *finder, bool allowslowness )
 {
     if (finder) {
         UnitPtrLocator unitLocator( ptr );
-        findObjects( activeSys->collidemap[Unit::UNIT_ONLY], finder->location[Unit::UNIT_ONLY], &unitLocator );
+        findObjects( activeSys->collide_map[Unit::UNIT_ONLY], finder->location[Unit::UNIT_ONLY], &unitLocator );
         if (unitLocator.retval)
             return reinterpret_cast< Unit* > (ptr);
 
@@ -644,7 +670,7 @@ QVector SafeStarSystemEntrancePoint( StarSystem *sts, QVector pos, float radial_
         {
             //fixme, make me faster, use collide map
             for (un_iter i = sts->getUnitList().createIterator(); (un = *i) != NULL; ++i) {
-                if (UnitUtil::isAsteroid( un ) || un->isUnit() == NEBULAPTR)
+                if (UnitUtil::isAsteroid( un ) || un->isUnit() == _UnitType::nebula)
                     continue;
                 double dist = ( pos-un->LocalPosition() ).Magnitude()-un->rSize()-/*def_un_size-*/ radial_size;
                 if (dist < 0) {
@@ -710,7 +736,7 @@ string LookupUnitStat( const string &unitname, const string &faction, const stri
 static std::vector< Unit* >cachedUnits;
 void precacheUnit( string type_string, string faction_string )
 {
-    cachedUnits.push_back( UnitFactory::createUnit( type_string.c_str(), true, FactionUtil::GetFactionIndex( faction_string ) ) );
+    cachedUnits.push_back( new GameUnit( type_string.c_str(), true, FactionUtil::GetFactionIndex( faction_string ) ) );
 }
 Unit * getPlayer()
 {
@@ -741,8 +767,8 @@ void receivedCustom( int cp, bool trusted, string cmd, string args, string id )
     securepythonstr( id );
     string pythonCode = game_options.custompython+"("+(trusted ? "True" : "False")
                         +", r\'"+cmd+"\', r\'"+args+"\', r\'"+id+"\')\n";
-    cout<<"Executing python command: "<<endl;
-    cout<<"    "<<pythonCode;
+    BOOST_LOG_TRIVIAL(info) << "Executing python command: ";
+    BOOST_LOG_TRIVIAL(info) << "    " << pythonCode;
     const char *cpycode = pythonCode.c_str();
     ::Python::reseterrors();
     PyRun_SimpleString( const_cast< char* > (cpycode) );

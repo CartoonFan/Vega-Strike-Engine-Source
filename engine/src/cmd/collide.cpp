@@ -1,3 +1,28 @@
+/**
+ * collide.cpp
+ *
+ * Copyright (C) 2020 Roy Falk, Stephen G. Tuggy and other Vega Strike
+ * contributors
+ *
+ * https://github.com/vegastrike/Vega-Strike-Engine-Source
+ *
+ * This file is part of Vega Strike.
+ *
+ * Vega Strike is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * Vega Strike is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with Vega Strike.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+
 #include "cmd/collide.h"
 #include "vegastrike.h"
 #include "unit_generic.h"
@@ -6,6 +31,7 @@
 #include "gfx/mesh.h"
 #include "unit_collide.h"
 #include "physics.h"
+#include "universe.h"
 
 #include "collide2/CSopcodecollider.h"
 #include "collide2/csgeom2/optransfrm.h"
@@ -15,6 +41,8 @@
 #include <string>
 #include "vs_globals.h"
 #include "configxml.h"
+#include "vsfilesystem.h"
+
 static Hashtable< std::string, collideTrees, 127 >unitColliders;
 collideTrees::collideTrees( const std::string &hk, csOPCODECollider *cT,
                             csOPCODECollider *cS ) : hash_key( hk )
@@ -36,7 +64,7 @@ csOPCODECollider* collideTrees::colTree( Unit *un, const Vector &othervelocity )
     float newmagsqr    = (un->GetVelocity()-othervelocity).MagnitudeSquared();
     float speedsquared = const_factor*const_factor*(magsqr > newmagsqr ? newmagsqr : magsqr);
     static unsigned int max_collide_trees = static_cast<unsigned int>(XMLSupport::parse_int( vs_config->getVariable( "physics", "max_collide_trees", "16384" ) ));
-    if (un->rSize()*un->rSize() > SIMULATION_ATOM*SIMULATION_ATOM*speedsquared || max_collide_trees == 1)
+    if (un->rSize()*un->rSize() > simulation_atom_var*simulation_atom_var*speedsquared || max_collide_trees == 1)
         return rapidColliders[0];
     if (rapidColliders[0] == NULL)
         return NULL;
@@ -74,12 +102,12 @@ void collideTrees::Dec()
 
 bool TableLocationChanged( const QVector &Mini, const QVector &minz )
 {
-    return _Universe->activeStarSystem()->collidetable->c.hash_int( Mini.i )
-           != _Universe->activeStarSystem()->collidetable->c.hash_int( minz.i )
-           || _Universe->activeStarSystem()->collidetable->c.hash_int( Mini.j )
-           != _Universe->activeStarSystem()->collidetable->c.hash_int( minz.j )
-           || _Universe->activeStarSystem()->collidetable->c.hash_int( Mini.k )
-           != _Universe->activeStarSystem()->collidetable->c.hash_int( minz.k );
+    return _Universe->activeStarSystem()->collide_table->c.hash_int( Mini.i )
+           != _Universe->activeStarSystem()->collide_table->c.hash_int( minz.i )
+           || _Universe->activeStarSystem()->collide_table->c.hash_int( Mini.j )
+           != _Universe->activeStarSystem()->collide_table->c.hash_int( minz.j )
+           || _Universe->activeStarSystem()->collide_table->c.hash_int( Mini.k )
+           != _Universe->activeStarSystem()->collide_table->c.hash_int( minz.k );
 }
 
 bool TableLocationChanged( const LineCollide &lc, const QVector &minx, const QVector &maxx )
@@ -89,28 +117,30 @@ bool TableLocationChanged( const LineCollide &lc, const QVector &minx, const QVe
 
 void KillCollideTable( LineCollide *lc, StarSystem *ss )
 {
-    if (lc->type == LineCollide::UNIT)
-        ss->collidetable->c.Remove( lc, lc->object.u );
-    else
-        printf( "such collide types as %d not allowed", lc->type );
+    if (lc->type == LineCollide::UNIT) {
+        ss->collide_table->c.Remove( lc, lc->object.u );
+    } else {
+        BOOST_LOG_TRIVIAL(warning) << boost::format("such collide types as %1$d not allowed") % lc->type;
+    }
 }
 
 bool EradicateCollideTable( LineCollide *lc, StarSystem *ss )
 {
     if (lc->type == LineCollide::UNIT) {
-        return ss->collidetable->c.Eradicate( lc->object.u );
+        return ss->collide_table->c.Eradicate( lc->object.u );
     } else {
-        printf( "such collide types as %d not allowed", lc->type );
+        BOOST_LOG_TRIVIAL(warning) << boost::format("such collide types as %1$d not allowed") % lc->type;
         return false;
     }
 }
 
 void AddCollideQueue( LineCollide &tmp, StarSystem *ss )
 {
-    if (tmp.type == LineCollide::UNIT)
-        ss->collidetable->c.Put( &tmp, tmp.object.u );
-    else
-        printf( "such collide types as %d not allowed", tmp.type );
+    if (tmp.type == LineCollide::UNIT) {
+        ss->collide_table->c.Put( &tmp, tmp.object.u );
+    } else {
+        BOOST_LOG_TRIVIAL(warning) << boost::format("such collide types as %1$d not allowed") % tmp.type;
+    }
 }
 
 bool lcwithin( const LineCollide &lc, const LineCollide &tmp )
@@ -135,7 +165,7 @@ bool usehuge_table()
 
 bool Bolt::Collide( Collidable::CollideRef index )
 {
-    return _Universe->activeStarSystem()->collidemap[Unit::UNIT_BOLT]->CheckCollisions( this, **location );
+    return _Universe->activeStarSystem()->collide_map[Unit::UNIT_BOLT]->CheckCollisions( this, **location );
 }
 
 static bool beamCheckCollision( QVector pos, float len, const Collidable &un )
@@ -151,7 +181,7 @@ void Beam::CollideHuge( const LineCollide &lc, Unit *targetToCollideWith, Unit *
         if (targetToCollideWith)
             this->Collide( targetToCollideWith, firer, superunit );
     } else if (curlength) {
-        CollideMap *cm = _Universe->activeStarSystem()->collidemap[Unit::UNIT_ONLY];
+        CollideMap *cm = _Universe->activeStarSystem()->collide_map[Unit::UNIT_ONLY];
 
         CollideMap::iterator superloc = superunit->location[Unit::UNIT_ONLY];
         CollideMap::iterator tmore    = superloc;

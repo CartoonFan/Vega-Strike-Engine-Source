@@ -8,6 +8,8 @@ using std::vector;
 #include "audiolib.h"
 #include "configxml.h"
 #include "images.h"
+#include "mount_size.h"
+#include "weapon_info.h"
 
 struct BeamDrawContext
 {
@@ -51,7 +53,6 @@ Beam::~Beam()
 #endif
     //DO NOT DELETE - shared vlist
     //delete vlist;
-    beamdecals.DelTexture( decal );
 }
 
 extern void AdjustMatrixToTrackTarget( Matrix &mat, const Vector &vel, Unit *target, float speed, bool lead, float cone );

@@ -5,11 +5,15 @@
 #include "ai/communication.h"
 #include "savegame.h"
 #include "xml_support.h"
-#include "unit_factory.h"
 #include "unit_util.h"
 #include "universe_util.h"
 #include "unit_const_cache.h"
 #include "pilot.h"
+#include "unit.h"
+#include "cmd/ai/order.h"
+#include "universe.h"
+#include "mount_size.h"
+
 //Various functions that were used in .cpp files that are now included because of
 //the temple GameUnit class
 //If not separated from those files functions would be defined in multiple places
@@ -41,13 +45,13 @@ const Unit * getUnitFromUpgradeName( const string &upgradeName, int myUnitFactio
     if (!partUnit) {
         partUnit = UnitConstCache::setCachedConst( StringIntKey( name,
                                                                 FactionUtil::GetUpgradeFaction() ),
-                                                  UnitFactory::createUnit( name, true, FactionUtil::GetUpgradeFaction() ) );
+                                                  new GameUnit( name, true, FactionUtil::GetUpgradeFaction() ) );
     }
     if (partUnit->name == "LOAD_FAILED") {
         partUnit = UnitConstCache::getCachedConst( StringIntKey( name, myUnitFaction ) );
         if (!partUnit)
             partUnit = UnitConstCache::setCachedConst( StringIntKey( name, myUnitFaction ),
-                                                      UnitFactory::createUnit( name, true, myUnitFaction ) );
+                                                      new GameUnit( name, true, myUnitFaction ) );
     }
     return partUnit;
 }
@@ -72,7 +76,7 @@ int SelectDockPort( Unit *utdw, Unit *parent )
 //From unit_customize.cpp
 Unit * CreateGameTurret( std::string tur, int faction )
 {
-    return UnitFactory::createUnit( tur.c_str(), true, faction );
+    return new GameUnit( tur.c_str(), true, faction );
 }
 
 void SetShieldZero( Unit *un )
@@ -105,7 +109,7 @@ void SetShieldZero( Unit *un )
 //un scored a faction kill
 void ScoreKill( Cockpit *cp, Unit *un, Unit *killedUnit )
 {
-    if (un->isUnit() != UNITPTR || killedUnit->isUnit() != UNITPTR)
+    if (un->isUnit() != _UnitType::unit || killedUnit->isUnit() != _UnitType::unit)
         return;
     static float KILL_FACTOR = -XMLSupport::parse_float( vs_config->getVariable( "AI", "kill_factor", ".2" ) );
     int killedCp = _Universe->whichPlayerStarship( killedUnit );
@@ -157,23 +161,7 @@ void ScoreKill( Cockpit *cp, Unit *un, Unit *killedUnit )
 }
 
 //From unit_physics.cpp
-signed char ComputeAutoGuarantee( Unit *un )
-{
-    Cockpit     *cp;
-    unsigned int cpnum = 0;
-    if ( ( cp = _Universe->isPlayerStarship( un ) ) )
-        cpnum = cp-_Universe->AccessCockpit( 0 );
-    else
-        return Mission::AUTO_ON;
-    unsigned int i;
-    for (i = 0; i < active_missions.size(); ++i)
-        if (active_missions[i]->player_num == cpnum && active_missions[i]->player_autopilot != Mission::AUTO_NORMAL)
-            return active_missions[i]->player_autopilot;
-    for (i = 0; i < active_missions.size(); i++)
-        if (active_missions[i]->global_autopilot != Mission::AUTO_NORMAL)
-            return active_missions[i]->global_autopilot;
-    return Mission::AUTO_NORMAL;
-}
+
 
 float getAutoRSize( Unit *orig, Unit *un, bool ignore_friend = false )
 {
@@ -187,12 +175,12 @@ float getAutoRSize( Unit *orig, Unit *un, bool ignore_friend = false )
         XMLSupport::parse_float( vs_config->getVariable( "physics", "hostile_auto_radius", "1000" ) )*gamespeed;
     int upgradefaction = FactionUtil::GetUpgradeFaction();
     int neutral = FactionUtil::GetNeutralFaction();
-    if (un->isUnit() == ASTEROIDPTR) {
+    if (un->isUnit() == _UnitType::asteroid) {
         static float minasteroiddistance =
             XMLSupport::parse_float( vs_config->getVariable( "physics", "min_asteroid_distance", "-100" ) );
         return minasteroiddistance;
     }
-    if ( un->isUnit() == PLANETPTR || ( un->getFlightgroup() == orig->getFlightgroup() && orig->getFlightgroup() ) )
+    if ( un->isUnit() == _UnitType::planet || ( un->getFlightgroup() == orig->getFlightgroup() && orig->getFlightgroup() ) )
         //same flihgtgroup
         return orig->rSize();
     if (un->faction == upgradefaction)
@@ -234,46 +222,12 @@ bool AdjustMatrix( Matrix &mat, const Vector &vel, Unit *target, float speed, bo
     return false;
 }
 
-enum weapon_info::MOUNT_SIZE lookupMountSize( const char *str )
-{
-    int  i;
-    char tmp[384];
-    for (i = 0; i < 383 && str[i] != '\0'; i++)
-        tmp[i] = (char) toupper( str[i] );
-    tmp[i] = '\0';
-    if (strcmp( "LIGHT", tmp ) == 0)
-        return weapon_info::LIGHT;
-    if (strcmp( "MEDIUM", tmp ) == 0)
-        return weapon_info::MEDIUM;
-    if (strcmp( "HEAVY", tmp ) == 0)
-        return weapon_info::HEAVY;
-    if (strcmp( "CAPSHIP-LIGHT", tmp ) == 0)
-        return weapon_info::CAPSHIPLIGHT;
-    if (strcmp( "CAPSHIP-HEAVY", tmp ) == 0)
-        return weapon_info::CAPSHIPHEAVY;
-    if (strcmp( "SPECIAL", tmp ) == 0)
-        return weapon_info::SPECIAL;
-    if (strcmp( "LIGHT-MISSILE", tmp ) == 0)
-        return weapon_info::LIGHTMISSILE;
-    if (strcmp( "MEDIUM-MISSILE", tmp ) == 0)
-        return weapon_info::MEDIUMMISSILE;
-    if (strcmp( "HEAVY-MISSILE", tmp ) == 0)
-        return weapon_info::HEAVYMISSILE;
-    if (strcmp( "LIGHT-CAPSHIP-MISSILE", tmp ) == 0)
-        return weapon_info::CAPSHIPLIGHTMISSILE;
-    if (strcmp( "HEAVY-CAPSHIP-MISSILE", tmp ) == 0)
-        return weapon_info::CAPSHIPHEAVYMISSILE;
-    if (strcmp( "SPECIAL-MISSILE", tmp ) == 0)
-        return weapon_info::SPECIALMISSILE;
-    if (strcmp( "AUTOTRACKING", tmp ) == 0)
-        return weapon_info::AUTOTRACKING;
-    return weapon_info::NOWEAP;
-}
 
+// TODO: delete
 int parseMountSizes( const char *str )
 {
     char tmp[13][50];
-    int  ans = weapon_info::NOWEAP;
+    int  ans = as_integer(MOUNT_SIZE::NOWEAP);
     int  num = sscanf( str,
                        "%s %s %s %s %s %s %s %s %s %s %s %s %s",
                        tmp[0],
@@ -290,7 +244,11 @@ int parseMountSizes( const char *str )
                        tmp[11],
                        tmp[12] );
     for (int i = 0; i < num && i < 13; i++)
-        ans |= lookupMountSize( tmp[i] );
+        ans |= as_integer(getMountSize( tmp[i] ));
+
+    int check = getMountSizes(str);
+    assert(check == ans);
+
     return ans;
 }
 

@@ -1,9 +1,36 @@
+/**
+ * aggressive.cpp
+ *
+ * Copyright (C) Daniel Horn
+ * Copyright (C) 2020 pyramid3d, Stephen G. Tuggy, and other Vega Strike
+ * contributors
+ *
+ * https://github.com/vegastrike/Vega-Strike-Engine-Source
+ *
+ * This file is part of Vega Strike.
+ *
+ * Vega Strike is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * Vega Strike is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with Vega Strike.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+
 #include <list>
 #include <vector>
 #include "aggressive.h"
 #include "event_xml.h"
 #include "script.h"
 #include "vs_globals.h"
+#include "vsfilesystem.h"
 #include "config_xml.h"
 #include "xml_support.h"
 #include "cmd/unit_generic.h"
@@ -25,6 +52,8 @@
 #include "cmd/unit_find.h"
 #include "faction_generic.h"
 #include "docking.h"
+#include "star_system.h"
+#include "universe.h"
 
 extern double aggfire;
 
@@ -178,8 +207,8 @@ static AIEvents::ElemAttrMap * getProperScript( Unit *me, Unit *targ, bool inter
         }
         return getProperLogicOrInterruptScript( "default", fac, nam, interrupt, personalityseed );
     }
-    return getProperLogicOrInterruptScript( ROLES::getRoleEvents( me->attackPreference(),
-                                                                 targ->unitRole() ), me->faction, me->name, interrupt,
+    return getProperLogicOrInterruptScript( ROLES::getRoleEvents( me->getAttackPreferenceChar(),
+                                                                 targ->getUnitRoleChar() ), me->faction, me->name, interrupt,
                                             personalityseed );
 }
 
@@ -287,7 +316,7 @@ bool AggressiveAI::ProcessLogicItem( const AIEvents::AIEvresult &item )
                 value = ( pdmag-parent->rSize()-targ->rSize() );
                 float  myvel = PosDifference.Dot( parent->GetVelocity()-targ->GetVelocity() )/value;        ///pdmag;
                 if (myvel > 0)
-                    value -= myvel*myvel/( 2*( parent->Limits().retro/parent->GetMass() ) );
+                    value -= myvel*myvel/( 2*( parent->limits.retro/parent->getMass() ) );
             } else {
                 value = 10000;
             }
@@ -685,14 +714,14 @@ bool AggressiveAI::ProcessCurrentFgDirective( Flightgroup *fg )
                     for (unsigned int i = 0; i < suborders.size(); i++)
                         suborders[i]->AttachSelfOrder( leader );
                 }
-            }       
-            //IAmDave - hold position command         
+            }
+            //IAmDave - hold position command
             else if (fg->directive.find( "s" ) != string::npos || fg->directive.find( "S" ) != string::npos) {
                Order * ord = new Orders::MatchVelocity(Vector(0,0,0),Vector(0,0,0),true,false);
                ord->SetParent( parent );
                ReplaceOrder( ord );
             }
-            //IAmDave - dock at target command start... 
+            //IAmDave - dock at target command start...
             else if (fg->directive.find( "t" ) != string::npos || fg->directive.find( "T" ) != string::npos) {
                Unit *targ   = fg->target.GetUnit();
                if ( targ->InCorrectStarSystem( _Universe->activeStarSystem() ) ) {
@@ -706,8 +735,8 @@ bool AggressiveAI::ProcessCurrentFgDirective( Flightgroup *fg )
                                 ord->SetParent( parent );
                                 ReplaceOrder( ord );
                }
-                
-            
+
+
             }
             //IAmDave - ...dock at target command end.
             else if (fg->directive.find( "l" ) != string::npos || fg->directive.find( "L" ) != string::npos) {
@@ -1139,12 +1168,13 @@ void AggressiveAI::ReCommandWing( Flightgroup *fg )
         if ( overridable( fg->directive ) ) {
             //computer won't override capital orders
             if ( NULL != ( lead = fg->leader.GetUnit() ) ) {
-                if (float( rand() )/RAND_MAX < SIMULATION_ATOM/time_to_recommand_wing) {
+                if (float( rand() )/RAND_MAX < simulation_atom_var/time_to_recommand_wing) {
                     if ( parent->Threat() && (parent->FShieldData() < .2 || parent->RShieldData() < .2) ) {
                         fg->directive = string( "h" );
                         LeadMe( parent, "h", "I need help here!", false );
-                        if (verbose_debug)
-                            VSFileSystem::vs_fprintf( stderr, "he needs help %s", parent->name.get().c_str() );
+                        if (verbose_debug) {
+                            BOOST_LOG_TRIVIAL(trace) << boost::format("he needs help %1%") % parent->name.get().c_str();
+                        }
                     } else if ( lead->getFgSubnumber() >= parent->getFgSubnumber() ) {
                         fg->directive = string( "b" );
                         LeadMe( parent, "b", "I'm taking over this wing. Break and attack", false );
@@ -1189,7 +1219,7 @@ static Unit * ChooseNavPoint( Unit *parent, Unit **otherdest, float *lurk_on_arr
             return ret;
     }
     StarSystem *ss = _Universe->activeStarSystem();
-    StarSystem::Statistics *stats = &ss->stats;
+    Statistics *stats = &ss->stats;
 
     float sysrel   = UnitUtil::getRelationFromFaction( parent, stats->system_faction );
     static float lurk_time   = XMLSupport::parse_float( vs_config->getVariable( "AI", "lurk_time", "600" ) );
@@ -1311,7 +1341,7 @@ static Unit * ChooseNearNavPoint( Unit *parent, Unit *suggestion, QVector locati
     float dist = FLT_MAX;
     Unit *un;
     NearestNavOrCapshipLocator nnl;
-    findObjects( _Universe->activeStarSystem()->collidemap[Unit::UNIT_ONLY],
+    findObjects( _Universe->activeStarSystem()->collide_map[Unit::UNIT_ONLY],
                  parent->location[Unit::UNIT_ONLY],
                  &nnl );
     return nnl.retval.unit;
@@ -1334,9 +1364,9 @@ bool CloseEnoughToNavOrDest( Unit *parent, Unit *navUnit, QVector nav )
 {
     static float how_far_to_stop_moving =
         XMLSupport::parse_float( vs_config->getVariable( "AI", "how_far_to_stop_navigating", "100" ) );
-    if (navUnit && navUnit->isUnit() != PLANETPTR) {
+    if (navUnit && navUnit->isUnit() != _UnitType::planet) {
         float dist = UnitUtil::getDistance( navUnit, parent );
-        if (dist < SIMULATION_ATOM*parent->Velocity.Magnitude()*parent->predicted_priority*how_far_to_stop_moving)
+        if (dist < SIMULATION_ATOM /*simulation_atom_var?*/ * parent->Velocity.Magnitude() * parent->predicted_priority * how_far_to_stop_moving)
             return true;
     }
     return ( nav-parent->Position() ).MagnitudeSquared() < 4*parent->rSize()*parent->rSize();
@@ -1361,12 +1391,14 @@ public: FlyTo( const QVector &target,
 
     virtual void Execute()
     {
-        if (parent == uoif)
-            printf( "kewl" );
+        if (parent == uoif) {
+            BOOST_LOG_TRIVIAL(info) << "kewl";
+        }
         MoveTo::Execute();
         Unit *un = destUnit.GetUnit();
-        if ( CloseEnoughToNavOrDest( parent, un, targetlocation ) )
+        if ( CloseEnoughToNavOrDest( parent, un, targetlocation ) ) {
             done = true;
+        }
         un = NULL;
         static float mintime = XMLSupport::parse_float( vs_config->getVariable( "AI", "min_time_to_auto", "25" ) );
         if (getNewTime()-creationtime > mintime) {
@@ -1375,8 +1407,9 @@ public: FlyTo( const QVector &target,
                 WarpToP( parent, un, true );
             } else {
                 Unit *playa = _Universe->AccessCockpit()->GetParent();
-                if (playa == NULL || playa->Target() != parent || 1)
+                if (playa == NULL || playa->Target() != parent || 1) {
                     WarpToP( parent, targetlocation, 0, true );
+                }
             }
         }
     }
@@ -1426,7 +1459,7 @@ void AggressiveAI::ExecuteNoEnemies()
             if (!otherdest) {
                 navDestination = dest;
                 dir = unitdir*( dest->rSize()+parent->rSize() );
-                if (dest->isUnit() == PLANETPTR) {
+                if (dest->isUnit() == _UnitType::planet) {
                     float planetpct = UniverseUtil::getPlanetRadiusPercent();
                     dir *= (planetpct+1.0f);
                     dir += randVector()*parent->rSize()*2*randspacingfactor;
@@ -1450,12 +1483,14 @@ void AggressiveAI::ExecuteNoEnemies()
             std::string fgname    = UnitUtil::getFlightgroupName( parent );
             std::string pfullname = parent->getFullname();
             std::string dfullname = dest->getFullname();
-            printf( "%s:%s %s going to %s:%s", parent->name.get().c_str(), pfullname.c_str(), fgname.c_str(),
-                   dest->name.get().c_str(), dfullname.c_str() );
+            BOOST_LOG_TRIVIAL(debug) << boost::format("%1%:%2% %3% going to %4%:%5%")
+                    % parent->name.get().c_str() % pfullname.c_str() % fgname.c_str() % dest->name.get().c_str() % dfullname.c_str();
             if (otherdest) {
                 std::string ofullname = otherdest->getFullname();
-                printf( " between %s:%s\n", otherdest->name.get().c_str(), ofullname.c_str() );
-            } else {printf( "\n" ); }
+                BOOST_LOG_TRIVIAL(debug) << boost::format(" between %1%:%2%\n") % otherdest->name.get().c_str() % ofullname.c_str();
+            } else {
+                BOOST_LOG_TRIVIAL(debug) << "\n";
+            }
 #endif
             GoTo( this, parent, nav, creationtime, otherdest != NULL, otherdest == NULL ? dest : NULL );
         }
@@ -1483,9 +1518,9 @@ void AggressiveAI::ExecuteNoEnemies()
                 //go dock to the nav point
             }
         } else if (lurk_on_arrival > 0) {
-            lurk_on_arrival -= SIMULATION_ATOM;
+            lurk_on_arrival -= simulation_atom_var;
             //slowdown
-            parent->Thrust( -parent->GetMass()*parent->UpCoordinateLevel( parent->GetVelocity() )/SIMULATION_ATOM, false );
+            parent->Thrust( -parent->getMass()*parent->UpCoordinateLevel( parent->GetVelocity() )/simulation_atom_var, false );
             parent->graphicOptions.InWarp = 0;
             if (lurk_on_arrival <= 0) {
                 nav = QVector( 0, 0, 0 );
@@ -1521,15 +1556,19 @@ volatile Unit *uoi;
 
 void AggressiveAI::Execute()
 {
-    if (parent == uoi)
-        printf( "kewl" );
+    if (parent == uoi) {
+        BOOST_LOG_TRIVIAL(info) << "kewl";
+    }
     jump_time_check++;     //just so we get a nicely often wrapping var;
     jump_time_check %= 5;
     Flightgroup  *fg  = parent->getFlightgroup();
     double firetime   = queryTime();
     static int    pir = FactionUtil::GetFactionIndex( "pirates" );
-    if (parent->faction == pir)
-        if (rand() == 0) printf( "ahoy, a pirates!" );
+    if (parent->faction == pir) {
+        if (rand() == 0) {
+            BOOST_LOG_TRIVIAL(info) << "ahoy, a pirates!";
+        }
+    }
     FireAt::Execute();
     aggfire += queryTime()-firetime;
     static bool resistance_to_side_movement =
@@ -1541,10 +1580,12 @@ void AggressiveAI::Execute()
         Vector countervelocity  = -parent->Velocity;
         Vector counterforce     = -parent->NetForce;
         float  forceforwardness = parent->NetForce.Dot( r );
-        if (forceforwardness > 0)
+        if (forceforwardness > 0) {
             counterforce = forceforwardness*r-parent->NetForce;
-        if (forwardness > 0)
+        }
+        if (forwardness > 0) {
             countervelocity = forwardness*r-parent->Velocity;
+        }
         static float resistance_percent =
             XMLSupport::parse_float( vs_config->getVariable( "AI", "resistance_to_side_movement_percent", ".01" ) );
         static float force_resistance_percent =
@@ -1568,7 +1609,7 @@ void AggressiveAI::Execute()
                     if (AIjumpCheat) {
                         static int i = 0;
                         if (!i) {
-                            VSFileSystem::vs_fprintf( stderr, "FIXME: warning ship not equipped to jump" );
+                            BOOST_LOG_TRIVIAL(warning) << "FIXME: warning ship not equipped to jump";
                             i = 1;
                         }
                         parent->jump.drive = -1;
@@ -1581,14 +1622,14 @@ void AggressiveAI::Execute()
                         parent->jump.drive = 0;
                 }
             }
-            last_jump_time += SIMULATION_ATOM;
+            last_jump_time += simulation_atom_var;
         } else {
             last_jump_time = 0;
         }
         if ( (!isjumpable) && interruptcurtime <= 0 && target )
             ProcessLogic( *logic, true );
         if (!target) {
-            logiccurtime -= SIMULATION_ATOM;
+            logiccurtime -= simulation_atom_var;
             if (logiccurtime < 0) {
                 logiccurtime    = 20;
                 currentpriority = -FLT_MAX;
@@ -1608,10 +1649,11 @@ void AggressiveAI::Execute()
         } else {
             if (target) {
                 static bool can_warp_to = XMLSupport::parse_bool( vs_config->getVariable( "AI", "warp_to_enemies", "true" ) );
-                if ( can_warp_to || _Universe->AccessCockpit()->autoInProgress() )
+                if ( can_warp_to || _Universe->AccessCockpit()->autoInProgress() ) {
                     WarpToP( parent, target, false );
-                logiccurtime     -= SIMULATION_ATOM;
-                interruptcurtime -= SIMULATION_ATOM;
+                }
+                logiccurtime     -= simulation_atom_var;
+                interruptcurtime -= simulation_atom_var;
                 if (logiccurtime <= 0) {
                     eraseType( Order::FACING );
                     eraseType( Order::MOVEMENT );
@@ -1629,8 +1671,8 @@ void AggressiveAI::Execute()
         }
     }
 #ifdef AGGDEBUG
-    VSFileSystem::vs_fprintf( stderr, "endagg" );
-    fflush( stderr );
+    BOOST_LOG_TRIVIAL(debug) << "endagg";
+    VSFileSystem::flushLogs();
 #endif
     if (getTimeCompression() > 3) {
         float mag = parent->GetVelocity().Magnitude();

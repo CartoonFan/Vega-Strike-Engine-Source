@@ -1,10 +1,35 @@
+/**
+ * universe_util.cpp
+ *
+ * Copyright (C) Daniel Horn
+ * Copyright (C) 2020 pyramid3d, Stephen G. Tuggy, and other Vega Strike
+ * contributors
+ *
+ * https://github.com/vegastrike/Vega-Strike-Engine-Source
+ *
+ * This file is part of Vega Strike.
+ *
+ * Vega Strike is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * Vega Strike is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with Vega Strike.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+
 /// Functions for python modules
 ///
 #include "cmd/script/mission.h"
 #include "universe_util.h"
 #include "universe.h"
 #include "cmd/unit.h"
-#include "cmd/unit_factory.h"    //for UnitFactory::getMasterPartList()
 #include "cmd/collection.h"
 #include "star_system.h"
 #include <string>
@@ -20,6 +45,7 @@
 #include "options.h"
 #include "universe.h"
 #include "savegame.h"
+#include "vsfilesystem.h"
 
 
 extern unsigned int AddAnimation( const QVector &pos,
@@ -201,7 +227,7 @@ bool isSplashScreenShowing()
 void sendCustom( int cp, string cmd, string args, string id )
 {
     if ( cp < 0 || cp >= static_cast<int>(_Universe->numPlayers()) ) {
-        fprintf( stderr, "sendCustom %s with invalid player %d\n", cmd.c_str(), cp );
+        BOOST_LOG_TRIVIAL(error) << boost::format("sendCustom %1% with invalid player %2%") % cmd % cp;
         return;
     }
         receivedCustom( cp, true, cmd, args, id );

@@ -1,23 +1,29 @@
-/*
- * Vega Strike
+/**
+ * mission.h
+ *
  * Copyright (C) 2001-2002 Daniel Horn
+ * Copyright (C) Alexander Rawass <alexannika@users.sourceforge.net>
+ * Copyright (C) 2020 pyramid3d, Stephen G. Tuggy, and other Vega Strike
+ * contributors
  *
- * http://vegastrike.sourceforge.net/
+ * https://github.com/vegastrike/Vega-Strike-Engine-Source
  *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
+ * This file is part of Vega Strike.
  *
- * This program is distributed in the hope that it will be useful,
+ * Vega Strike is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * Vega Strike is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+ * along with Vega Strike.  If not, see <https://www.gnu.org/licenses/>.
  */
+
 
 /*
  *  xml Mission written by Alexander Rawass <alexannika@users.sourceforge.net>
@@ -38,6 +44,7 @@
 
 #ifndef VS_MIS_SEL
 #include "vegastrike.h"
+#include "vsfilesystem.h"
 #include "vs_globals.h"
 #include "msgcenter.h"
 #include "cmd/container.h"
@@ -45,6 +52,8 @@ class Unit;
 class Order;
 class MessageCenter;
 #endif
+
+#include "star_system.h"
 
 #include <assert.h>
 using std::string;
@@ -308,7 +317,8 @@ public: varInst( scope_type sctype )
     }
     varInst()
     {
-        std::cout<<"varInst() obsolete\n"<<std::endl;
+        BOOST_LOG_TRIVIAL(fatal) << "varInst() obsolete\n";
+        VSFileSystem::flushLogs();
         assert( 0 );
     }
 
@@ -466,7 +476,7 @@ public:
     static double gametime;
     string mission_name;
     void terminateMission();
-    Unit  *call_unit_launch( class CreateFlightgroup*fg, int type /*clsptr type*/, const std::string&destinations );
+    Unit  *call_unit_launch( class CreateFlightgroup*fg, int type /*_UnitType type*/, const std::string&destinations );
 
     Mission( const char *configfile, bool loadscripts = true );
     Mission( const char *filename, const std::string &pythonscript, bool loadscripts = true );

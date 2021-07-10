@@ -1,10 +1,11 @@
 // -*- mode: c++; c-basic-offset: 4; indent-tabs-mode: nil -*-
 
 #include "cmd/unit_generic.h"
-#include "cmd/planet_generic.h"
+#include "cmd/planet.h"
 #include "cmd/unit_util.h"
 #include "cmd/unit_find.h"
 #include "sensor.h"
+#include "universe.h"
 
 extern Unit *getTopLevelOwner(); // WTF... located in star_system_generic.cpp
 
@@ -155,7 +156,7 @@ public:
             {
                 collection->push_back(sensor->CreateTrack(target));
             }
-            if (target->isPlanet() == PLANETPTR && target->radial_size > 0)
+            if (target->isPlanet() == _UnitType::planet && target->radial_size > 0)
             {
                 const Unit *sub = NULL;
                 for (un_kiter i = target->viewSubUnits(); (sub = *i) != NULL; ++i)
@@ -193,7 +194,7 @@ const Sensor::TrackCollection& Sensor::FindTracksInRange() const
     unitLocator.action.init(this, &collection, player);
     if (! is_null(player->location[Unit::UNIT_ONLY]))
     {
-        findObjects(_Universe->activeStarSystem()->collidemap[Unit::UNIT_ONLY],
+        findObjects(_Universe->activeStarSystem()->collide_map[Unit::UNIT_ONLY],
                     player->location[Unit::UNIT_ONLY],
                     &unitLocator);
     }

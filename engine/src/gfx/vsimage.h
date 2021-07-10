@@ -1,3 +1,26 @@
+/**
+ * vsimage.h
+ *
+ * Copyright (C) 2020 pyramid3d, Roy Falk, Stephen G. Tuggy,
+ * and other Vega Strike contributors.
+ *
+ * This file is part of Vega Strike.
+ *
+ * Vega Strike is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * Vega Strike is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with Vega Strike.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+
 #ifndef __VSIMAGE__H
 #define __VSIMAGE__H
 
@@ -14,14 +37,6 @@ typedef unsigned int   DWORD;
 typedef int            LONG;
 typedef unsigned short WORD;
 typedef unsigned char  BYTE;
-
-#if !defined (_WIN32) || defined (__CYGWIN__) || defined (__MINGW32__)
-  #define LOCALCONST_DECL( Type, cName, Value ) static const Type cName = Value;
-  #define LOCALCONST_DEF( Class, Type, cName, Value )
-#else
-  #define LOCALCONST_DECL( Type, cName, Value ) static Type cName;
-  #define LOCALCONST_DEF( Class, Type, cName, Value ) Type Class::cName = Value;
-#endif
 
 /**
  * Windows Bitmap format.
@@ -64,13 +79,24 @@ typedef struct
     BYTE rgbRed;
     BYTE rgbReserved;
 } RGBQUAD;
+
+#define LOCALCONST_DECL( Type, cName, Value ) static const Type cName = Value;
+#define LOCALCONST_DEF( Class, Type, cName, Value )
+
 #else
+
+#define LOCALCONST_DECL( Type, cName, Value ) static Type cName;
+#define LOCALCONST_DEF( Class, Type, cName, Value ) Type Class::cName = Value;
+
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif //tells VCC not to generate min/max macros
 #include <windows.h>
 #include <wingdi.h>
+
 #endif
+
+
 
 /*
  * Standard DDS formats.
@@ -236,7 +262,6 @@ public: VSImage();
     //Defined for gcc which pads size of structs (not entirely necessary)
     //const static int SIZEOF_RGBQUAD;
     LOCALCONST_DECL( int, SIZEOF_RGBQUAD, sizeof (BYTE)*4 )
-
 
 //f2 is needed for bmp loading
     unsigned char*ReadImage( VSFileSystem::VSFile*f,

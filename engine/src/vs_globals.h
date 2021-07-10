@@ -2,19 +2,13 @@
 #define __VS_GLOBALS_H_
 #include <vector>
 
-#include "universe_generic.h"
 #include "command.h"
+
+class Universe;
+
 extern commandI *CommandInterpretor;
 extern Universe *_Universe;
-/*
- * #ifdef _SERVER
- * #include "universe_generic.h"
- *       extern Universe _Universe;
- * #else
- * #include "universe.h"
- *       extern GameUniverse _Universe;
- * #endif
- */
+
 
 #ifdef WIN32
 #define RESTRICT __restrict
@@ -103,7 +97,8 @@ public:
     }
     MyType operator[]( unsigned int i )
     {
-        return (*active_missions)[i];
+        // stephengtuggy 2020-10-17: Enforce bounds checking
+        return active_missions->at(i);
     }
     ~LeakVector()
     {

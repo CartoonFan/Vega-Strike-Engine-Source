@@ -1,23 +1,26 @@
 /*
- * Vega Strike
+ * navpath.cpp
+ *
  * Copyright (C) 2003 Mike Byron
+ * Copyright (C) 2020 pyramid3d, Roy Falk, Stephen G. Tuggy, and other
+ * Vega Strike contributors.
  *
- * http://vegastrike.sourceforge.net/
+ * This file is part of Vega Strike.
  *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
+ * Vega Strike is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 2 of the License, or
+ * (at your option) any later version.
  *
- * This program is distributed in the hope that it will be useful,
+ * Vega Strike is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+ * along with Vega Strike.  If not, see <https://www.gnu.org/licenses/>.
  */
+
 
 #include "vegastrike.h"
 #if defined (_WIN32) && !defined (__CYGWIN__) && !defined (__MINGW32__)
@@ -29,6 +32,7 @@
 #include "gfx/cockpit.h"
 #include "navscreen.h"
 #include "configxml.h"
+#include "universe.h"
 
 #include <vector>
 using std::vector;
@@ -43,7 +47,6 @@ using std::map;
 #include <string>
 using std::string;
 #include <iostream>
-using std::cout;
 using std::endl;
 using std::pair;
 
@@ -314,8 +317,8 @@ bool NavPath::evaluate()
         deque< unsigned > *front;
         unsigned visitMark;
         if ( originIndex >= visited.size() || destIndex >= visited.size() ) {
-            fprintf( stderr, "(previously) FATAL error with nav system, referencing value too big %d %d with visited size %d\n",
-                    (int) originIndex, (int) destIndex, (int) visited.size() );
+            BOOST_LOG_TRIVIAL(error) << boost::format("(previously) FATAL error with nav system, referencing value too big %1% %2% with visited size %3%")
+                                        % ((int) originIndex) % ((int) destIndex) % ((int) visited.size());
             return false;
         }
         oriFront.push_back( originIndex );
@@ -563,14 +566,16 @@ bool PathManager::removePath( NavPath *path )
 
 void PathManager::showAll()
 {
-    for (std::vector< NavPath* >::iterator i = paths.begin(); i < paths.end(); ++i)
+    for (std::vector< NavPath* >::iterator i = paths.begin(); i < paths.end(); ++i) {
         (*i)->setVisible( true );
+    }
 }
 
 void PathManager::showNone()
 {
-    for (std::vector< NavPath* >::iterator i = paths.begin(); i < paths.end(); ++i)
+    for (std::vector< NavPath* >::iterator i = paths.begin(); i < paths.end(); ++i) {
         (*i)->setVisible( false );
+    }
 }
 
 bool PathManager::updateSpecificPath( NavPath *path )
@@ -587,33 +592,38 @@ void PathManager::updatePaths( UpdateType type )
     DFS();
     if (type == ALL) {
         for (std::vector< NavPath* >::iterator j = paths.begin(); j < paths.end(); ++j) {
-            std::cerr<<"Updating path: "<<(*j)->getName()<<endl;
+            BOOST_LOG_TRIVIAL(info) << "Updating path: " << (*j)->getName();
             (*j)->update();
         }
     } else if (type == CURRENT) {
-        for (i = topoOrder.begin(); i != topoOrder.end(); ++i)
+        for (i = topoOrder.begin(); i != topoOrder.end(); ++i) {
             (*i)->updated = false;
-        for (i = topoOrder.begin(); i != topoOrder.end(); ++i)
+        }
+        for (i = topoOrder.begin(); i != topoOrder.end(); ++i) {
             if ( (*i)->updated == false && (*i)->isCurrentDependant() ) {
-                std::cerr<<"Updating path: "<<(*i)->getName()<<endl;
+                BOOST_LOG_TRIVIAL(info) << "Updating path: " << (*i)->getName();
                 updateSpecificPath( *i );
             }
+        }
     } else {
-        for (i = topoOrder.begin(); i != topoOrder.end(); ++i)
+        for (i = topoOrder.begin(); i != topoOrder.end(); ++i) {
             (*i)->updated = false;
-        for (i = topoOrder.begin(); i != topoOrder.end(); ++i)
+        }
+        for (i = topoOrder.begin(); i != topoOrder.end(); ++i) {
             if ( (*i)->updated == false && (*i)->isTargetDependant() ) {
-                std::cerr<<"Updating path: "<<(*i)->getName()<<endl;
+                BOOST_LOG_TRIVIAL(info) << "Updating path: " << (*i)->getName();
                 updateSpecificPath( *i );
             }
+        }
     }
 }
 
 void PathManager::updateDependants( NavPath *parent )
 {
     set< NavPath* > *dependants = parent->getDependants();
-    for (std::set< NavPath* >::iterator i = dependants->begin(); i != dependants->end(); ++i)
+    for (std::set< NavPath* >::iterator i = dependants->begin(); i != dependants->end(); ++i) {
         updateSpecificPath( *i );
+    }
 }
 
 void PathManager::DFS()

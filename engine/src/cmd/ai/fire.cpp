@@ -1,9 +1,36 @@
+/**
+ * fire.cpp
+ *
+ * Copyright (C) Daniel Horn
+ * Copyright (C) 2020 pyramid3d, Stephen G. Tuggy, and other Vega Strike
+ * contributors
+ *
+ * https://github.com/vegastrike/Vega-Strike-Engine-Source
+ *
+ * This file is part of Vega Strike.
+ *
+ * Vega Strike is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * Vega Strike is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with Vega Strike.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+
 #include "fire.h"
 #include "flybywire.h"
 #include "navigation.h"
-#include "cmd/planet_generic.h"
+#include "cmd/planet.h"
 #include "config_xml.h"
 #include "vs_globals.h"
+#include "vsfilesystem.h"
 #include "cmd/unit_util.h"
 #include "cmd/script/flightgroup.h"
 #include "cmd/role_bitmask.h"
@@ -14,6 +41,7 @@
 #include "vs_random.h"
 #include "lin_time.h" //DEBUG ONLY
 #include "cmd/pilot.h"
+#include "universe.h"
 
 extern int numprocessed;
 extern double targetpick;
@@ -32,45 +60,55 @@ Unit * getAtmospheric( Unit *targ )
         Unit *un;
         for (un_iter i = _Universe->activeStarSystem()->getUnitList().createIterator();
              (un = *i) != NULL;
-             ++i)
-            if (un->isUnit() == PLANETPTR) {
-                if ( ( targ->Position()-un->Position() ).Magnitude() < targ->rSize()*.5 )
-                    if ( !( ( (Planet*) un )->isAtmospheric() ) )
+             ++i) {
+            if (un->isUnit() == _UnitType::planet) {
+                if ( ( targ->Position()-un->Position() ).Magnitude() < targ->rSize()*.5 ) {
+                    if ( !( ( (Planet*) un )->isAtmospheric() ) ) {
                         return un;
+                    }
+                }
             }
+        }
     }
     return NULL;
 }
 
 bool RequestClearence( Unit *parent, Unit *targ, unsigned char sex )
 {
-    if ( !targ->DockingPortLocations().size() )
+    if ( !targ->DockingPortLocations().size() ) {
         return false;
-    if (targ->isUnit() == PLANETPTR) {
+    }
+
+    if (targ->isUnit() == _UnitType::planet) {
         if ( ( (Planet*) targ )->isAtmospheric() && NoDockWithClear() ) {
             targ = getAtmospheric( targ );
-            if (!targ)
+            if (!targ) {
                 return false;
+            }
             parent->Target( targ );
         }
     }
     CommunicationMessage c( parent, targ, NULL, sex );
     c.SetCurrentState( c.fsm->GetRequestLandNode(), NULL, sex );
     Order *o = targ->getAIState();
-    if (o)
+    if (o) {
         o->Communicate( c );
+    }
     return true;
 }
 
 using Orders::FireAt;
 bool FireAt::PursueTarget( Unit *un, bool leader )
 {
-    if (leader)
+    if (leader) {
         return true;
-    if ( un == parent->Target() )
+    }
+    if ( un == parent->Target() ) {
         return rand() < .9*RAND_MAX;
-    if (parent->getRelation( un ) < 0)
+    }
+    if (parent->getRelation( un ) < 0) {
         return rand() < .2*RAND_MAX;
+    }
     return false;
 }
 
@@ -78,11 +116,11 @@ bool CanFaceTarget( Unit *su, Unit *targ, const Matrix &matrix )
 {
     return true;
 
-    float limitmin = su->Limits().limitmin;
+    float limitmin = su->limits.limitmin;
     if (limitmin > -.99) {
         QVector pos   = ( targ->Position()-su->Position() ).Normalize();
         QVector pnorm = pos.Cast();
-        Vector  structurelimits = su->Limits().structurelimits;
+        Vector  structurelimits = su->limits.structurelimits;
         Vector  worldlimit = TransformNormal( matrix, structurelimits );
         if (pnorm.Dot( worldlimit ) < limitmin)
             return false;
@@ -176,7 +214,7 @@ struct TurretBin
             uniter->tur->TargetTurret( NULL );
             if (finalChoice.t) {
                 if (finalChoice.range < uniter->gunrange
-                    && ROLES::getPriority( uniter->tur->attackPreference() )[finalChoice.t->unitRole()] < 31) {
+                    && ROLES::getPriority( uniter->tur->getAttackPreferenceChar() )[finalChoice.t->getUnitRoleChar()] < 31) {
                     if ( CanFaceTarget( uniter->tur, finalChoice.t, pos ) ) {
                         uniter->tur->Target( finalChoice.t );
                         uniter->tur->TargetTurret( finalChoice.t );
@@ -208,7 +246,7 @@ void AssignTBin( Unit *su, vector< TurretBin > &tbin )
 {
     unsigned int bnum = 0;
     for (; bnum < tbin.size(); bnum++)
-        if ( su->attackPreference() == tbin[bnum].turret[0].tur->attackPreference() )
+        if ( su->getAttackPreferenceChar() == tbin[bnum].turret[0].tur->getAttackPreferenceChar() )
             break;
     if ( bnum >= tbin.size() )
         tbin.push_back( TurretBin() );
@@ -234,9 +272,9 @@ float Priority( Unit *me, Unit *targ, float gunrange, float rangetotarget, float
 {
     if (relationship >= 0)
         return -1;
-    if (targ->GetHull() < 0)
+    if (targ->hull < 0)
         return -1;
-    *rolepriority = ROLES::getPriority( me->attackPreference() )[targ->unitRole()];     //number btw 0 and 31 higher better
+    *rolepriority = ROLES::getPriority( me->getAttackPreferenceChar() )[targ->getUnitRoleChar()];     //number btw 0 and 31 higher better
     char invrolepriority = 31-*rolepriority;
     if (invrolepriority <= 0)
         return -1;
@@ -255,7 +293,7 @@ float Priority( Unit *me, Unit *targ, float gunrange, float rangetotarget, float
     {
         static float mass_inertial_priority_cutoff =
             XMLSupport::parse_float( vs_config->getVariable( "AI", "Targetting", "MassInertialPriorityCutoff", "5000" ) );
-        if (me->GetMass() > mass_inertial_priority_cutoff) {
+        if (me->getMass() > mass_inertial_priority_cutoff) {
             static float mass_inertial_priority_scale =
                 XMLSupport::parse_float( vs_config->getVariable( "AI", "Targetting", "MassInertialPriorityScale", ".0000001" ) );
             Vector normv( me->GetVelocity() );
@@ -263,7 +301,7 @@ float Priority( Unit *me, Unit *targ, float gunrange, float rangetotarget, float
             normv *= Speed ? 1.0f/Speed : 1.0f;
             Vector ourToThem = targ->Position()-me->Position();
             ourToThem.Normalize();
-            inertial_priority = mass_inertial_priority_scale*( .5+.5*( normv.Dot( ourToThem ) ) )*me->GetMass()*Speed;
+            inertial_priority = mass_inertial_priority_scale*( .5+.5*( normv.Dot( ourToThem ) ) )*me->getMass()*Speed;
         }
     }
     static float threat_weight = XMLSupport::parse_float( vs_config->getVariable( "AI", "Targetting", "ThreatWeight", ".5" ) );
@@ -399,7 +437,7 @@ public:
             for (vector< TurretBin >::iterator k = tbin->begin(); k != tbin->end(); ++k) {
                 if (rangetotarget > k->maxrange)
                     break;
-                const char tprior = ROLES::getPriority( k->turret[0].tur->attackPreference() )[un->unitRole()];
+                const char tprior = ROLES::getPriority( k->turret[0].tur->getAttackPreferenceChar() )[un->getUnitRoleChar()];
                 if (relationship < 0) {
                     if (tprior < 16) {
                         k->listOfTargets[0].push_back( TargetAndRange( un, rangetotarget, relationship ) );
@@ -443,8 +481,7 @@ void FireAt::ChooseTargets( int numtargs, bool force )
     Unit *curtarg = parent->Target();
     int   hastarg = (curtarg == NULL) ? 0 : 1;
     //Following code exists to limit the number of craft polling for a target in a given frame - this is an expensive operation, and needs to be spread out, or there will be pauses.
-    static float simatom = XMLSupport::parse_float( vs_config->getVariable( "general", "simulation_atom", "0.1" ) );
-    if ( ( UniverseUtil::GetGameTime() )-targettimer >= simatom*.99 ) {
+    if ( ( UniverseUtil::GetGameTime() )-targettimer >= SIMULATION_ATOM*.99 ) {
         //Check if one or more physics frames have passed
         numpolled[0] = numpolled[1] = 0;         //reset counters
         prevpollindex[0]   = pollindex[0];
@@ -482,8 +519,8 @@ void FireAt::ChooseTargets( int numtargs, bool force )
         static unsigned int pointdef = ROLES::getRole( "POINTDEF" );
         static bool assignpointdef   =
             XMLSupport::parse_bool( vs_config->getVariable( "AI", "Targetting", "AssignPointDef", "true" ) );
-        if ( (su->attackPreference() != pointdef) || assignpointdef ) {
-            if (su->attackPreference() != inert) {
+        if ( (su->getAttackPreferenceChar() != pointdef) || assignpointdef ) {
+            if (su->getAttackPreferenceChar() != inert) {
                 AssignTBin( su, tbin );
             } else {
                 Unit *ssu = NULL;
@@ -533,7 +570,7 @@ void FireAt::ChooseTargets( int numtargs, bool force )
     }
     if (unitLocator.action.mytarg == NULL)      //decided to rechoose or did not have initial target
         findObjects(
-            _Universe->activeStarSystem()->collidemap[Unit::UNIT_ONLY], parent->location[Unit::UNIT_ONLY], &unitLocator );
+            _Universe->activeStarSystem()->collide_map[Unit::UNIT_ONLY], parent->location[Unit::UNIT_ONLY], &unitLocator );
     Unit *mytarg = unitLocator.action.mytarg;
     targetpick += queryTime()-pretable;
     if (mytarg) {
@@ -578,8 +615,9 @@ bool FireAt::ShouldFire( Unit *targ, bool &missilelock )
         return false;
 
         static int test = 0;
-        if (test++%1000 == 1)
-            VSFileSystem::vs_fprintf( stderr, "lost target" );
+        if (test++%1000 == 1) {
+            BOOST_LOG_TRIVIAL(warning) << "lost target";
+        }
     }
     float gunspeed, gunrange, missilerange;
     parent->getAverageGunSpeed( gunspeed, gunrange, missilerange );
@@ -600,7 +638,7 @@ bool FireAt::ShouldFire( Unit *targ, bool &missilelock )
                                                                            "MaximumFiringAngle.maxagg",
                                                                            "18" ) )/180. );                                                                      //Roughly 18 degrees
     float temp   = parent->TrackingGuns( missilelock );
-    bool  isjumppoint = targ->isUnit() == PLANETPTR && ( (Planet*) targ )->GetDestinations().empty() == false;
+    bool  isjumppoint = targ->isUnit() == _UnitType::planet && ( (Planet*) targ )->GetDestinations().empty() == false;
     float fangle = (fireangle_minagg+fireangle_maxagg*agg)/(1.0f+agg);
     bool retval  =
         ( (dist < firewhen)
@@ -631,8 +669,8 @@ bool FireAt::ShouldFire( Unit *targ, bool &missilelock )
 FireAt::~FireAt()
 {
 #ifdef ORDERDEBUG
-    VSFileSystem::vs_fprintf( stderr, "fire%x\n", this );
-    fflush( stderr );
+    BOOST_LOG_TRIVIAL(trace) << boost::format("fire%1$x") % this;
+    VSFileSystem::flushLogs();
 #endif
 }
 
@@ -641,7 +679,7 @@ unsigned int FireBitmask( Unit *parent, bool shouldfire, bool firemissile )
     unsigned int firebitm = ROLES::EVERYTHING_ELSE;
     Unit *un = parent->Target();
     if (un) {
-        firebitm = ( 1<<un->unitRole() );
+        firebitm = ( 1<<un->getUnitRoleChar() );
 
         static bool AlwaysFireAutotrackers =
             XMLSupport::parse_bool( vs_config->getVariable( "AI", "AlwaysFireAutotrackers", "true" ) );
@@ -660,8 +698,9 @@ unsigned int FireBitmask( Unit *parent, bool shouldfire, bool firemissile )
 void FireAt::FireWeapons( bool shouldfire, bool lockmissile )
 {
     static float missiledelay     = XMLSupport::parse_float( vs_config->getVariable( "AI", "MissileGunDelay", "4" ) );
+    //Will rand() be in the expected range here? -- stephengtuggy 2020-07-25
     bool fire_missile = lockmissile && rand() < RAND_MAX*missileprobability*SIMULATION_ATOM;
-    delay += SIMULATION_ATOM;
+    delay += SIMULATION_ATOM; //simulation_atom_var?
     if ( shouldfire && delay < parent->pilot->getReactionTime() )
         return;
     else if (!shouldfire)
@@ -675,7 +714,7 @@ void FireAt::FireWeapons( bool shouldfire, bool lockmissile )
 
 bool FireAt::isJumpablePlanet( Unit *targ )
 {
-    bool istargetjumpableplanet = targ->isUnit() == PLANETPTR;
+    bool istargetjumpableplanet = targ->isUnit() == _UnitType::planet;
     if (istargetjumpableplanet) {
         istargetjumpableplanet = ( !( (Planet*) targ )->GetDestinations().empty() ) && (parent->GetJumpStatus().drive >= 0);
     }
@@ -686,7 +725,7 @@ using std::string;
 void FireAt::PossiblySwitchTarget( bool unused )
 {
     static float targettime = XMLSupport::parse_float( vs_config->getVariable( "AI", "Targetting", "TimeUntilSwitch", "20" ) );
-    if ( (targettime <= 0) || (vsrandom.uniformInc( 0, 1 ) < SIMULATION_ATOM/targettime) ) {
+    if ( (targettime <= 0) || (vsrandom.uniformInc( 0, 1 ) < simulation_atom_var/targettime) ) {
         bool ct = true;
         Flightgroup *fg;
         if ( ( fg = parent->getFlightgroup() ) )
@@ -705,11 +744,13 @@ void FireAt::Execute()
     Order::Execute();
     done = tmp;
     Unit *targ;
-    if (parent->isUnit() == UNITPTR) {
+    if (parent->isUnit() == _UnitType::unit) {
         static float cont_update_time   = XMLSupport::parse_float( vs_config->getVariable( "AI", "ContrabandUpdateTime", "1" ) );
+        //Will rand() be in the expected range here? -- stephengtuggy 2020-07-25
         if (rand() < RAND_MAX*SIMULATION_ATOM/cont_update_time)
             UpdateContrabandSearch();
         static float cont_initiate_time = XMLSupport::parse_float( vs_config->getVariable( "AI", "CommInitiateTime", "300" ) );
+        //Or here?
         if ( (float) rand() < ( (float) RAND_MAX*(SIMULATION_ATOM/cont_initiate_time) ) ) {
             static float contraband_initiate_time =
                 XMLSupport::parse_float( vs_config->getVariable( "AI", "ContrabandInitiateTime", "3000" ) );
@@ -733,9 +774,9 @@ void FireAt::Execute()
     bool istargetjumpableplanet = false;
     if ( ( targ = parent->Target() ) ) {
         istargetjumpableplanet = isJumpablePlanet( targ );
-        if (targ->CloakVisible() > .8 && targ->GetHull() >= 0) {
+        if (targ->CloakVisible() > .8 && targ->hull >= 0) {
             had_target = true;
-            if (parent->GetNumMounts() > 0)
+            if (parent->getNumMounts() > 0)
                 if (!istargetjumpableplanet)
                     shouldfire |= ShouldFire( targ, missilelock );
         } else {
@@ -750,7 +791,7 @@ void FireAt::Execute()
         lastchangedtarg = -100000;
     }
     PossiblySwitchTarget( istargetjumpableplanet );
-    if ( (!istargetjumpableplanet) && parent->GetNumMounts() > 0 )
+    if ( (!istargetjumpableplanet) && parent->getNumMounts() > 0 )
         FireWeapons( shouldfire, missilelock );
 }
 

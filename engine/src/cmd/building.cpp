@@ -1,33 +1,33 @@
 #include "building.h"
 #include "cont_terrain.h"
 
-GameBuilding::GameBuilding( ContinuousTerrain *parent,
+Building::Building( ContinuousTerrain *parent,
                             bool vehicle,
                             const char *filename,
                             bool SubUnit,
                             int faction,
                             const string &modifications,
-                            Flightgroup *fg ) : GameUnit< Building > ( filename, SubUnit, faction, modifications, fg )
+                            Flightgroup *fg ) : GameUnit( filename, SubUnit, faction, modifications, fg )
 {
     this->vehicle = vehicle;
     continuous    = true;
     this->parent.plane = parent;
 }
 
-GameBuilding::GameBuilding( Terrain *parent,
+Building::Building( Terrain *parent,
                             bool vehicle,
                             const char *filename,
                             bool SubUnit,
                             int faction,
                             const string &modifications,
-                            Flightgroup *fg ) : GameUnit< Building > ( filename, SubUnit, faction, modifications, fg )
+                            Flightgroup *fg ) : GameUnit( filename, SubUnit, faction, modifications, fg )
 {
     this->vehicle = vehicle;
     continuous    = false;
     this->parent.terrain = parent;
 }
 
-void GameBuilding::UpdatePhysics2( const Transformation &trans,
+void Building::UpdatePhysics2( const Transformation &trans,
                                    const Transformation &old_physical_state,
                                    const Vector &accel,
                                    float difficulty,
@@ -36,7 +36,7 @@ void GameBuilding::UpdatePhysics2( const Transformation &trans,
                                    bool ResolveLast,
                                    UnitCollection *uc )
 {
-    GameUnit< Building >::UpdatePhysics2( trans,
+    GameUnit::UpdatePhysics2( trans,
                                           old_physical_state,
                                           accel,
                                           difficulty,
@@ -65,7 +65,7 @@ void GameBuilding::UpdatePhysics2( const Transformation &trans,
         {
             tmp1 = 200*q.Cross( p );
         }
-        NetLocalTorque += ( ( tmp1-tmp1*( tmp1.Dot( GetAngularVelocity() )/tmp1.Dot( tmp1 ) ) ) )*1./GetMass();
+        NetLocalTorque += ( ( tmp1-tmp1*( tmp1.Dot( GetAngularVelocity() )/tmp1.Dot( tmp1 ) ) ) )*1./Mass;
     }
     SetCurPosition( tmp );
 }

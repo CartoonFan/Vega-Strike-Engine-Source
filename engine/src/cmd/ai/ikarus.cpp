@@ -36,7 +36,7 @@ void Ikarus::ExecuteStrategy( Unit *target )
     if (0)
         ReplaceOrder( new AIScript( "++turntowards.xml" ) );          //find this list of names in script.cpp
 
-    cur_time += SIMULATION_ATOM;
+    cur_time += simulation_atom_var; //SIMULATION_ATOM;
     if (cur_time-last_time > 5) {
         //dosomething
 
@@ -47,8 +47,14 @@ void Ikarus::ExecuteStrategy( Unit *target )
 void Ikarus::WillFire( Unit *target )
 {
     bool  missilelockp = false;
-    if ( ShouldFire( target, missilelockp ) )     //this is a function from fire.cpp  you probably want to write a better one
+    if ( ShouldFire( target, missilelockp ) ) {
+        // this is a function from fire.cpp  you probably want to write a better one
+        // Roy Falk - This function was actually in unit_generic and moved to armed
+        // The false is coerced into unsigned int for the bitmask.
+        // I suspect that while this compiled, the boolean was not meant to do apply to the first parameter but to the second one -
+        // either beams_target_owner or listen_to_owner
         parent->Fire( false );
+    }
     if (missilelockp) {
         parent->Fire( true );         //if missiles locked fire
         parent->ToggleWeapon( true );

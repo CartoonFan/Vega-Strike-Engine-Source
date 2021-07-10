@@ -1,6 +1,6 @@
 //====================================
 // @file   : mesh_gfx.cpp
-// @version: 2020-02-14
+// @version: 2020-10-28
 // @created: 2002-12-14
 // @author : surfdargent
 // @author : hellcatv
@@ -8,8 +8,34 @@
 // @author : klaussfreire
 // @author : dan_w
 // @author : pyramid
+// @author : stephengtuggy
 // @brief  : draws meshes
 //====================================
+
+/**
+ * mesh_gfx.cpp
+ *
+ * Copyright (C) 2002-2020 surfdargent, hellcatv, ace123, klaussfreire, dan_w,
+ * pyramid3d, Stephen G. Tuggy, and other Vega Strike contributors
+ *
+ * https://github.com/vegastrike/Vega-Strike-Engine-Source
+ *
+ * This file is part of Vega Strike.
+ *
+ * Vega Strike is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * Vega Strike is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with Vega Strike.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
 
 #include <algorithm>
 #include "mesh.h"
@@ -18,7 +44,7 @@
 #include "lin_time.h"
 #include "configxml.h"
 #include "vs_globals.h"
-#include "cmd/nebula_generic.h"
+#include "cmd/nebula.h"
 #include "gfx/camera.h"
 #include "gfx/animation.h"
 #include "gfx/technique.h"
@@ -29,8 +55,13 @@
 #include "cg_global.h"
 #endif
 #include "universe_util.h"
+#include "universe.h"
 #include <utility>
+#ifdef _WIN32
+// What do we need from unistd? - let's find out :)
+#else
 #include <unistd.h>
+#endif
 #include <signal.h>
 #include <sys/types.h>
 
@@ -87,19 +118,19 @@ public:
     {
         assert( passno < orig->technique->getNumPasses() );
 
-        const Technique::Pass &pass = orig->technique->getPass( passno );
+        const Pass &pass = orig->technique->getPass( passno );
         this->orig = orig;
         this->d = -d;
         this->passno = passno;
         this->sequence    = pass.sequence;
         this->program     = pass.getCompiledProgram();
         this->transparent =
-            ( (pass.blendMode == Technique::Pass::Decal)
-             || ( (pass.blendMode == Technique::Pass::Default)
+            ( (pass.blendMode == Pass::Decal)
+             || ( (pass.blendMode == Pass::Default)
                  && (orig->blendDst == ZERO)
                  && (orig->blendSrc != DESTCOLOR) )
               ) ? 0 : 1;
-        this->zsort = ( transparent && ( (pass.blendMode != Technique::Pass::Default) || (orig->blendDst != ONE) || (orig->blendSrc != ONE) ) ) ? 1 : 0;
+        this->zsort = ( transparent && ( (pass.blendMode != Pass::Default) || (orig->blendDst != ONE) || (orig->blendSrc != ONE) ) ) ? 1 : 0;
 
         assert( this->passno == passno );
         assert( this->sequence == pass.sequence );
@@ -136,18 +167,18 @@ public:
                 PLESS( orig->Decal[0] );
         } else {
             //Shader passes sort by effective texture
-            const Technique::Pass &apass = orig->technique->getPass( passno );
-            const Technique::Pass &bpass = b.orig->technique->getPass( b.passno );
+            const Pass &apass = orig->technique->getPass( passno );
+            const Pass &bpass = b.orig->technique->getPass( b.passno );
 
             SLESSX( apass.getNumTextureUnits(), bpass.getNumTextureUnits() );
             for (size_t i = 0, n = apass.getNumTextureUnits(); i < n; ++i) {
-                const Technique::Pass::TextureUnit atu = apass.getTextureUnit( i );
-                const Technique::Pass::TextureUnit btu = bpass.getTextureUnit( i );
+                const Pass::TextureUnit atu = apass.getTextureUnit( i );
+                const Pass::TextureUnit btu = bpass.getTextureUnit( i );
                 if (atu.sourceType == btu.sourceType) {
-                    if (atu.sourceType == Technique::Pass::TextureUnit::File) {
+                    if (atu.sourceType == Pass::TextureUnit::File) {
                         //Compare preloaded textures
                         SLESSX( *atu.texture, *btu.texture );
-                    } else if (atu.sourceType == Technique::Pass::TextureUnit::Decal) {
+                    } else if (atu.sourceType == Pass::TextureUnit::Decal) {
                         //Compare decal textures
                         const Texture *ta = ( atu.sourceIndex < static_cast<int>(orig->Decal.size()) ) ? orig->Decal[atu.sourceIndex] : NULL;
                         const Texture *tb = ( btu.sourceIndex < static_cast<int>(b.orig->Decal.size()) ) ? b.orig->Decal[btu.sourceIndex] : NULL;
@@ -155,7 +186,7 @@ public:
                     }
                 } else {
                     //Render file-type ones first
-                    return atu.sourceType == Technique::Pass::TextureUnit::File;
+                    return atu.sourceType == Pass::TextureUnit::File;
                 }
             }
         }
@@ -376,9 +407,12 @@ Mesh::~Mesh()
             for (OrigMeshVector::iterator it = undrawn_meshes[j].begin(); it != undrawn_meshes[j].end(); ++it)
                 if (it->orig == this) {
                     undrawn_meshes[j].erase( it-- );
-                    VSFileSystem::vs_fprintf( stderr, "stale mesh found in draw queue--removed!\n" );
+                    BOOST_LOG_TRIVIAL(debug) << "stale mesh found in draw queue--removed!";
                 }
-        delete vlist;
+        if (vlist) {
+            delete vlist;
+            vlist = nullptr;
+        }
         for (unsigned int i = 0; i < Decal.size(); i++)
             if (Decal[i] != NULL) {
                 delete Decal[i];
@@ -403,16 +437,21 @@ Mesh::~Mesh()
                     if ( hashers->empty() ) {
                         bfxmHashTable.Delete( hash_name );
                         delete hashers;
+                        hashers = nullptr;
                     }
                 }
         }
-        if (draw_queue != NULL)
+        if (draw_queue != nullptr) {
             delete[] draw_queue;
+            draw_queue = nullptr;
+        }
     } else {
         orig->refcount--;
-        //printf ("orig refcount: %d",refcount);
-        if (orig->refcount == 0)
+        BOOST_LOG_TRIVIAL(debug) << boost::format("orig refcount: %1%") % refcount;
+        if (orig->refcount == 0) {
             delete[] orig;
+            orig = nullptr;
+        }
     }
 }
 
@@ -544,7 +583,7 @@ void Mesh::ProcessZFarMeshes( bool nocamerasetup ) {
         for (OrigMeshVector::iterator it = undrawn_meshes[a].begin(); it < undrawn_meshes[a].end(); ++it) {
             Mesh *m = it->orig;
             m->ProcessDrawQueue( it->passno, a, it->zsort, _Universe->AccessCamera()->GetPosition() );
-            m->will_be_drawn &= ( ~(1<<a) );           //not accurate any more 
+            m->will_be_drawn &= ( ~(1<<a) );           //not accurate any more
         }
         for (OrigMeshVector::iterator it = undrawn_meshes[a].begin(); it < undrawn_meshes[a].end(); ++it) {
             Mesh *m = it->orig;
@@ -589,7 +628,7 @@ void Mesh::ProcessUndrawnMeshes( bool pushSpecialEffects, bool nocamerasetup ) {
         // Therefore "else if (!nocamerasetup)" is replaced with
         // "} else {" until fixed.
         // The bug was introduced in (svn r13722)
-        //} else if (!nocamerasetup) { 
+        //} else if (!nocamerasetup) {
         } else { // less correct (svn r13721) but working on nav computer
             _Universe->AccessCamera()->UpdateGFXFrustum( GFXTRUE, g_game.znear, g_game.zfar );
         }
@@ -977,8 +1016,8 @@ void RestoreSpecMapState( bool envMap, bool detailMap, bool write_to_depthmap, f
 void Mesh::ProcessDrawQueue( size_t whichpass, int whichdrawqueue, bool zsort, const QVector &sortctr )
 {
     //Process the pass for all queued instances
-    const Technique::Pass &pass = technique->getPass( whichpass );
-    if (pass.type == Technique::Pass::ShaderPass)
+    const Pass &pass = technique->getPass( whichpass );
+    if (pass.type == Pass::ShaderPass)
         ProcessShaderDrawQueue( whichpass, whichdrawqueue, zsort, sortctr );
     else
         ProcessFixedDrawQueue( whichpass, whichdrawqueue, zsort, sortctr );
@@ -987,62 +1026,62 @@ void Mesh::ProcessDrawQueue( size_t whichpass, int whichdrawqueue, bool zsort, c
         GFXToggleTexture( i < 2, i );
 }
 
-void Mesh::activateTextureUnit( const Technique::Pass::TextureUnit &tu, bool deflt )
+void Mesh::activateTextureUnit( const Pass::TextureUnit &tu, bool deflt )
 {
     //I'm leaving target and source index as int's because I tried to change technique.h's target and source to size_t's
     //and had problems. So I'll just add static casts to int to the unsigned/size_t other sides in comparisons --chuck_starchaser
     int targetIndex = tu.targetIndex;
     int sourceIndex = deflt ? tu.defaultIndex : tu.sourceIndex;
-    Technique::Pass::TextureUnit::SourceType sourceType = deflt ? tu.defaultType : tu.sourceType;
+    Pass::TextureUnit::SourceType sourceType = deflt ? tu.defaultType : tu.sourceType;
     switch (sourceType)
     {
-    case Technique::Pass::TextureUnit::File:
+    case Pass::TextureUnit::File:
         //Direct file sources go in tu.texture
         switch (tu.texKind)
         {
-        case Technique::Pass::TextureUnit::TexDefault:
-        case Technique::Pass::TextureUnit::Tex2D:
-        case Technique::Pass::TextureUnit::Tex3D:
-        case Technique::Pass::TextureUnit::TexCube:
+        case Pass::TextureUnit::TexDefault:
+        case Pass::TextureUnit::Tex2D:
+        case Pass::TextureUnit::Tex3D:
+        case Pass::TextureUnit::TexCube:
             tu.texture->MakeActive( targetIndex );
             break;
-        case Technique::Pass::TextureUnit::TexSepCube:
+        case Pass::TextureUnit::TexSepCube:
         default: throw Exception( "Texture Unit for technique of unhandled kind" );
         }
         switch (tu.texKind)
         {
-        case Technique::Pass::TextureUnit::TexDefault:
-        case Technique::Pass::TextureUnit::Tex2D:
+        case Pass::TextureUnit::TexDefault:
+        case Pass::TextureUnit::Tex2D:
             GFXToggleTexture( true, targetIndex, TEXTURE2D );
             break;
-        case Technique::Pass::TextureUnit::Tex3D:
+        case Pass::TextureUnit::Tex3D:
             GFXToggleTexture( true, targetIndex, TEXTURE3D );
             break;
-        case Technique::Pass::TextureUnit::TexCube:
-        case Technique::Pass::TextureUnit::TexSepCube:
+        case Pass::TextureUnit::TexCube:
+        case Pass::TextureUnit::TexSepCube:
             GFXToggleTexture( true, targetIndex, CUBEMAP );
             break;
         default: throw Exception( "Texture Unit for technique of unhandled kind" );
         }
         break;
-    case Technique::Pass::TextureUnit::Environment:
+    case Pass::TextureUnit::Environment:
         _Universe->activateLightMap( targetIndex );
         #ifdef NV_CUBE_MAP
-        if (tu.texKind != Technique::Pass::TextureUnit::TexDefault
-            && tu.texKind != Technique::Pass::TextureUnit::TexCube
-            && tu.texKind != Technique::Pass::TextureUnit::TexSepCube) throw Exception(
+        if (tu.texKind != Pass::TextureUnit::TexDefault
+            && tu.texKind != Pass::TextureUnit::TexCube
+            && tu.texKind != Pass::TextureUnit::TexSepCube) throw Exception(
                 "Environment Texture Unit for technique must be a cube map" );
         GFXToggleTexture( true, targetIndex, CUBEMAP );
         #else
-        if (tu.texKind != Technique::Pass::TextureUnit::TexDefault
-            && tu.texKind != Technique::Pass::TextureUnit::Tex2D) throw Exception(
+        if (tu.texKind != Pass::TextureUnit::TexDefault
+            && tu.texKind != Pass::TextureUnit::Tex2D) throw Exception(
                 "Environment Texture Unit for technique must be a 2D spheremap" );
         GFXToggleTexture( true, targetIndex, TEXTURE2D );
         #endif
         break;
-    case Technique::Pass::TextureUnit::Detail:
-        if (tu.texKind != Technique::Pass::TextureUnit::TexDefault
-            && tu.texKind != Technique::Pass::TextureUnit::Tex2D) throw Exception(
+    case Pass::TextureUnit::Detail:
+        if (tu.texKind != Pass::TextureUnit::TexDefault
+            && tu.texKind != Pass::TextureUnit::Tex2D) throw Exception(
                 "Detail Texture Unit for technique must be 2D" );
         if (detailTexture)
             detailTexture->MakeActive( targetIndex );
@@ -1051,7 +1090,7 @@ void Mesh::activateTextureUnit( const Technique::Pass::TextureUnit &tu, bool def
         else throw MissingTexture(
                 "Texture Unit for technique requested a missing texture (detail default given that cannot be found)" );
         break;
-    case Technique::Pass::TextureUnit::Decal:
+    case Pass::TextureUnit::Decal:
         if ( ( sourceIndex < static_cast<int>(Decal.size()) ) && Decal[sourceIndex] )
             //Mesh has the referenced decal
             Decal[sourceIndex]->MakeActive( targetIndex );
@@ -1061,27 +1100,27 @@ void Mesh::activateTextureUnit( const Technique::Pass::TextureUnit &tu, bool def
                 "Texture Unit for technique requested a missing texture (decal default given that cannot be found)" );
         switch (tu.texKind)
         {
-        case Technique::Pass::TextureUnit::TexDefault:
-        case Technique::Pass::TextureUnit::Tex2D:
+        case Pass::TextureUnit::TexDefault:
+        case Pass::TextureUnit::Tex2D:
             GFXToggleTexture( true, targetIndex, TEXTURE2D );
             break;
-        case Technique::Pass::TextureUnit::Tex3D:
+        case Pass::TextureUnit::Tex3D:
             GFXToggleTexture( true, targetIndex, TEXTURE3D );
             break;
-        case Technique::Pass::TextureUnit::TexCube:
-        case Technique::Pass::TextureUnit::TexSepCube:
+        case Pass::TextureUnit::TexCube:
+        case Pass::TextureUnit::TexSepCube:
             GFXToggleTexture( true, targetIndex, CUBEMAP );
             break;
         default: throw Exception( "Texture Unit for technique of unhandled kind" );
         }
         break;
-    case Technique::Pass::TextureUnit::None: //chuck_starchaser
+    case Pass::TextureUnit::None: //chuck_starchaser
     default:
         break;
     }
 }
 
-static void setupGLState(const Technique::Pass &pass, bool zwrite, BLENDFUNC blendSrc, BLENDFUNC blendDst, int material, unsigned char alphatest, int whichdrawqueue)
+static void setupGLState(const Pass &pass, bool zwrite, BLENDFUNC blendSrc, BLENDFUNC blendDst, int material, unsigned char alphatest, int whichdrawqueue)
 {
     //Setup color/z writes, culling, etc...
     if (pass.colorWrite)
@@ -1092,26 +1131,26 @@ static void setupGLState(const Technique::Pass &pass, bool zwrite, BLENDFUNC ble
         DEPTHFUNC func;
         switch (pass.depthFunction)
         {
-        case Technique::Pass::Always:
+        case Pass::Always:
             func = ALWAYS;
             break;
-        case Technique::Pass::Never:
+        case Pass::Never:
             func = NEVER;
             break;
-        case Technique::Pass::Less:
+        case Pass::Less:
             func = LESS;
             break;
-        case Technique::Pass::Greater:
+        case Pass::Greater:
             func = GREATER;
             break;
-        case Technique::Pass::GEqual:
+        case Pass::GEqual:
             func = GEQUAL;
             break;
-        case Technique::Pass::Equal:
+        case Pass::Equal:
             func = EQUAL;
             break;
         default:
-        case Technique::Pass::LEqual:
+        case Pass::LEqual:
             func = LEQUAL;
             break;
         }
@@ -1121,24 +1160,24 @@ static void setupGLState(const Technique::Pass &pass, bool zwrite, BLENDFUNC ble
         POLYMODE mode;
         switch (pass.polyMode)
         {
-        case Technique::Pass::Point:
+        case Pass::Point:
             mode = GFXPOINTMODE;
             break;
-        case Technique::Pass::Line:
+        case Pass::Line:
             mode = GFXLINEMODE;
             break;
         default:
-        case Technique::Pass::Fill:
+        case Pass::Fill:
             mode = GFXFILLMODE;
             break;
         }
         GFXPolygonMode( mode );
     }
-    if (pass.polyMode == Technique::Pass::Line)
+    if (pass.polyMode == Pass::Line)
         GFXLineWidth( pass.lineWidth );
-    if (pass.cullMode == Technique::Pass::None) {
+    if (pass.cullMode == Pass::None) {
         GFXDisable( CULLFACE );
-    } else if (pass.cullMode == Technique::Pass::DefaultFace) {
+    } else if (pass.cullMode == Pass::DefaultFace) {
         //Not handled by this helper function, since it depends on mesh data
         //SelectCullFace( whichdrawqueue );
     } else {
@@ -1146,14 +1185,14 @@ static void setupGLState(const Technique::Pass &pass, bool zwrite, BLENDFUNC ble
         GFXEnable( CULLFACE );
         switch (pass.cullMode)
         {
-        case Technique::Pass::Front:
+        case Pass::Front:
             face = GFXFRONT;
             break;
-        case Technique::Pass::FrontAndBack:
+        case Pass::FrontAndBack:
             face = GFXFRONTANDBACK;
             break;
         default:
-        case Technique::Pass::Back:
+        case Pass::Back:
             face = GFXBACK;
             break;
         }
@@ -1169,23 +1208,23 @@ static void setupGLState(const Technique::Pass &pass, bool zwrite, BLENDFUNC ble
     //Setup blend mode
     switch (pass.blendMode)
     {
-    case Technique::Pass::Add:
+    case Pass::Add:
         GFXBlendMode( ONE, ONE );
         break;
-    case Technique::Pass::AlphaBlend:
-    case Technique::Pass::MultiAlphaBlend:
+    case Pass::AlphaBlend:
+    case Pass::MultiAlphaBlend:
         GFXBlendMode( SRCALPHA, INVSRCALPHA );
         break;
-    case Technique::Pass::Decal:
+    case Pass::Decal:
         GFXBlendMode( ONE, ZERO );
         break;
-    case Technique::Pass::Multiply:
+    case Pass::Multiply:
         GFXBlendMode( DESTCOLOR, ZERO );
         break;
-    case Technique::Pass::PremultAlphaBlend:
+    case Pass::PremultAlphaBlend:
         GFXBlendMode(ONE, INVSRCALPHA);
         break;
-    case Technique::Pass::Default:
+    case Pass::Default:
     default:
         GFXBlendMode( blendSrc, blendDst );
         break;
@@ -1215,12 +1254,11 @@ void Mesh::ProcessShaderDrawQueue( size_t whichpass, int whichdrawqueue, bool zs
             technique->compile();
         }
         catch (const Exception& e) {
-            // VSFileSystem::vs_dprintf(1, "Technique recompilation failed: %s\n", e.what());
             BOOST_LOG_TRIVIAL(info) << boost::format("Technique recompilation failed: %1%") % e.what();
         }
     }
 
-    const Technique::Pass &pass = technique->getPass( whichpass );
+    const Pass &pass = technique->getPass( whichpass );
 
     //First of all, decide zwrite, so we can skip the pass if !zwrite && !cwrite
     bool zwrite;
@@ -1232,12 +1270,12 @@ void Mesh::ProcessShaderDrawQueue( size_t whichpass, int whichdrawqueue, bool zs
         zwrite = (blendDst == ZERO);
         switch (pass.zWrite)
         {
-        case Technique::Pass::Auto:
+        case Pass::Auto:
             break;
-        case Technique::Pass::True:
+        case Pass::True:
             zwrite = true;
             break;
-        case Technique::Pass::False:
+        case Pass::False:
             zwrite = false;
             break;
         }
@@ -1252,7 +1290,7 @@ void Mesh::ProcessShaderDrawQueue( size_t whichpass, int whichdrawqueue, bool zs
 
     GFXPushBlendMode();
     setupGLState(pass, zwrite, blendSrc, blendDst, myMatNum, alphatest, whichdrawqueue);
-    if (pass.cullMode == Technique::Pass::DefaultFace)
+    if (pass.cullMode == Pass::DefaultFace)
         SelectCullFace( whichdrawqueue ); // Default not handled by setupGLState, it depends on mesh data
 
     //Activate shader
@@ -1263,35 +1301,35 @@ void Mesh::ProcessShaderDrawQueue( size_t whichpass, int whichdrawqueue, bool zs
     int apparentLightSizeArrayParam = -1;
     int numLightsParam = -1;
     for (size_t spi = 0; spi < pass.getNumShaderParams(); ++spi) {
-        const Technique::Pass::ShaderParam &sp = pass.getShaderParam( spi );
+        const Pass::ShaderParam &sp = pass.getShaderParam( spi );
         if (sp.id >= 0) {
             switch (sp.semantic)
             {
-            case Technique::Pass::ShaderParam::Constant:
+            case Pass::ShaderParam::Constant:
                 GFXShaderConstant( sp.id, sp.value );
                 break;
-            case Technique::Pass::ShaderParam::EnvColor:
+            case Pass::ShaderParam::EnvColor:
                 GFXShaderConstant( sp.id, getEnvMap() ? envmaprgba : noenvmaprgba );
                 break;
-            case Technique::Pass::ShaderParam::DetailPlane0:
+            case Pass::ShaderParam::DetailPlane0:
                 GFXShaderConstant( sp.id, detailPlanes[0] );
                 break;
-            case Technique::Pass::ShaderParam::DetailPlane1:
+            case Pass::ShaderParam::DetailPlane1:
                 GFXShaderConstant( sp.id, detailPlanes[1] );
                 break;
-            case Technique::Pass::ShaderParam::GameTime:
+            case Pass::ShaderParam::GameTime:
                 GFXShaderConstant( sp.id, UniverseUtil::GetGameTime() );
                 break;
-            case Technique::Pass::ShaderParam::NumLights:
+            case Pass::ShaderParam::NumLights:
                 numLightsParam = sp.id;
                 break;
-            case Technique::Pass::ShaderParam::ActiveLightsArray:
+            case Pass::ShaderParam::ActiveLightsArray:
                 activeLightsArrayParam = sp.id;
                 break;
-            case Technique::Pass::ShaderParam::ApparentLightSizeArray:
+            case Pass::ShaderParam::ApparentLightSizeArray:
                 apparentLightSizeArrayParam = sp.id;
                 break;
-            case Technique::Pass::ShaderParam::CloakingPhase: //chuck_starchaser
+            case Pass::ShaderParam::CloakingPhase: //chuck_starchaser
             default:
                 break;
             }
@@ -1301,7 +1339,7 @@ void Mesh::ProcessShaderDrawQueue( size_t whichpass, int whichdrawqueue, bool zs
     size_t tui;
     size_t tuimask = 0;
     for (tui = 0; tui < pass.getNumTextureUnits(); ++tui) {
-        const Technique::Pass::TextureUnit &tu = pass.getTextureUnit( tui );
+        const Pass::TextureUnit &tu = pass.getTextureUnit( tui );
         if (tu.targetIndex < 0)
             continue;
         if (tu.targetParamId >= 0)
@@ -1314,7 +1352,7 @@ void Mesh::ProcessShaderDrawQueue( size_t whichpass, int whichdrawqueue, bool zs
             tuimask |= (1<<tu.targetIndex);
         }
         catch (const MissingTexture& e) {
-            if (tu.defaultType == Technique::Pass::TextureUnit::Decal && tu.defaultIndex == 0) {
+            if (tu.defaultType == Pass::TextureUnit::Decal && tu.defaultIndex == 0) {
                 //Global default for decal 0 is white, this allows textureless objects
                 //that would otherwise not be possible
                 static Texture *white = new Texture( "white.png" );
@@ -1390,10 +1428,10 @@ void Mesh::ProcessShaderDrawQueue( size_t whichpass, int whichdrawqueue, bool zs
                 //MultiAlphaBlend stuff
                 if (iter > 0) {
                     switch (pass.blendMode) {
-                        case Technique::Pass::MultiAlphaBlend:
+                        case Pass::MultiAlphaBlend:
                             GFXBlendMode( SRCALPHA, ONE );
                             break;
-                        case Technique::Pass::Default:
+                        case Pass::Default:
                             GFXBlendMode( blendSrc, ONE );
                             break;
                         default:
@@ -1418,34 +1456,34 @@ void Mesh::ProcessShaderDrawQueue( size_t whichpass, int whichdrawqueue, bool zs
                     lights.begin() + lightnum + npasslights );
 
                 for (unsigned int spi = 0; spi < pass.getNumShaderParams(); ++spi) {
-                    const Technique::Pass::ShaderParam &sp = pass.getShaderParam( spi );
+                    const Pass::ShaderParam &sp = pass.getShaderParam( spi );
                     if (sp.id >= 0) {
                         switch (sp.semantic)
                         {
-                        case Technique::Pass::ShaderParam::CloakingPhase:
+                        case Pass::ShaderParam::CloakingPhase:
                             GFXShaderConstant( sp.id,
                                               c.CloakFX.r,
                                               c.CloakFX.a,
                                               ( (c.cloaked&MeshDrawContext::CLOAK) ? 1.f : 0.f ),
                                               ( (c.cloaked&MeshDrawContext::GLASSCLOAK) ? 1.f : 0.f ) );
                             break;
-                        case Technique::Pass::ShaderParam::Damage:
+                        case Pass::ShaderParam::Damage:
                             GFXShaderConstant( sp.id, c.damage/255.f );
                             break;
-                        case Technique::Pass::ShaderParam::Damage4:
+                        case Pass::ShaderParam::Damage4:
                             GFXShaderConstant( sp.id,
                                                c.damage/255.f,
                                                c.damage/255.f,
                                                c.damage/255.f,
                                                c.damage/255.f );
                             break;
-                        case Technique::Pass::ShaderParam::EnvColor: //chuck_starchaser
-                        case Technique::Pass::ShaderParam::DetailPlane0:
-                        case Technique::Pass::ShaderParam::DetailPlane1:
-                        case Technique::Pass::ShaderParam::NumLights:
-                        case Technique::Pass::ShaderParam::ActiveLightsArray:
-                        case Technique::Pass::ShaderParam::GameTime:
-                        case Technique::Pass::ShaderParam::Constant:
+                        case Pass::ShaderParam::EnvColor: //chuck_starchaser
+                        case Pass::ShaderParam::DetailPlane0:
+                        case Pass::ShaderParam::DetailPlane1:
+                        case Pass::ShaderParam::NumLights:
+                        case Pass::ShaderParam::ActiveLightsArray:
+                        case Pass::ShaderParam::GameTime:
+                        case Pass::ShaderParam::Constant:
                         default:
                             break;
                         }
@@ -1474,7 +1512,7 @@ void Mesh::ProcessShaderDrawQueue( size_t whichpass, int whichdrawqueue, bool zs
     GFXPolygonMode( GFXFILLMODE );
     GFXPolygonOffset( 0, 0 );
     GFXDepthFunc( LEQUAL );
-    if (pass.polyMode == Technique::Pass::Line)
+    if (pass.polyMode == Pass::Line)
         GFXLineWidth( 1 );
     //Restore blend mode
     GFXPopBlendMode();
@@ -1486,7 +1524,7 @@ void Mesh::ProcessShaderDrawQueue( size_t whichpass, int whichdrawqueue, bool zs
 
 void Mesh::ProcessFixedDrawQueue( size_t techpass, int whichdrawqueue, bool zsort, const QVector &sortctr )
 {
-    const Technique::Pass &pass = technique->getPass( techpass );
+    const Pass &pass = technique->getPass( techpass );
 
     //First of all, decide zwrite, so we can skip the pass if !zwrite && !cwrite
     bool zwrite;
@@ -1498,12 +1536,12 @@ void Mesh::ProcessFixedDrawQueue( size_t techpass, int whichdrawqueue, bool zsor
         zwrite = (blendDst == ZERO);
         switch (pass.zWrite)
         {
-        case Technique::Pass::Auto:
+        case Pass::Auto:
             break;
-        case Technique::Pass::True:
+        case Pass::True:
             zwrite = true;
             break;
-        case Technique::Pass::False:
+        case Pass::False:
             zwrite = false;
             break;
         }
@@ -1516,14 +1554,14 @@ void Mesh::ProcessFixedDrawQueue( size_t techpass, int whichdrawqueue, bool zsor
     Texture *Decal[NUM_PASSES];
     memset( Decal, 0, sizeof (Decal) );
     for (unsigned int tui = 0; tui < pass.getNumTextureUnits(); ++tui) {
-        const Technique::Pass::TextureUnit &tu = pass.getTextureUnit( tui );
+        const Pass::TextureUnit &tu = pass.getTextureUnit( tui );
         switch (tu.sourceType)
         {
-        case Technique::Pass::TextureUnit::File:
+        case Pass::TextureUnit::File:
             //Direct file sources go in tu.texture
             Decal[tu.targetIndex] = tu.texture.get();
             break;
-        case Technique::Pass::TextureUnit::Decal:
+        case Pass::TextureUnit::Decal:
             if ( ( tu.sourceIndex < static_cast<int>(this->Decal.size()) ) && this->Decal[tu.sourceIndex] ) {
                 //Mesh has the referenced decal
                 Decal[tu.targetIndex] = this->Decal[tu.sourceIndex];
@@ -1531,11 +1569,11 @@ void Mesh::ProcessFixedDrawQueue( size_t techpass, int whichdrawqueue, bool zsor
                 //Mesh does not have the referenced decal, activate the default
                 switch (tu.defaultType)
                 {
-                case Technique::Pass::TextureUnit::File:
+                case Pass::TextureUnit::File:
                     //Direct file defaults go in tu.texture (direct file sources preclude defaults)
                     Decal[tu.targetIndex] = tu.texture.get();
                     break;
-                case Technique::Pass::TextureUnit::Decal:
+                case Pass::TextureUnit::Decal:
                     //Decal reference as default - risky, but may be cool
                     if ( ( tu.defaultIndex < static_cast<int>(this->Decal.size()) ) && this->Decal[tu.defaultIndex] )
                         //Valid reference, activate
@@ -1544,28 +1582,28 @@ void Mesh::ProcessFixedDrawQueue( size_t techpass, int whichdrawqueue, bool zsor
                         //Invalid reference, activate global default (null)
                         Decal[tu.targetIndex] = NULL;
                     break;
-                case Technique::Pass::TextureUnit::None: //chuck_starchaser
-                case Technique::Pass::TextureUnit::Environment:
-                case Technique::Pass::TextureUnit::Detail:
+                case Pass::TextureUnit::None: //chuck_starchaser
+                case Pass::TextureUnit::Environment:
+                case Pass::TextureUnit::Detail:
                 default:
                     break;
                 }
             }
             break;
-        case Technique::Pass::TextureUnit::None: //chuck_starchaser
-        case Technique::Pass::TextureUnit::Environment:
-        case Technique::Pass::TextureUnit::Detail:
+        case Pass::TextureUnit::None: //chuck_starchaser
+        case Pass::TextureUnit::Environment:
+        case Pass::TextureUnit::Detail:
         default:
             break;
         }
     }
     std::vector< MeshDrawContext > &cur_draw_queue = draw_queue[whichdrawqueue];
     if ( cur_draw_queue.empty() ) {
-        static bool thiserrdone = false;         //Avoid filling up stderr.txt with this thing (it would be output at least once per frame)
+        static bool thiserrdone = false;         //Avoid filling up logs with this thing (it would be output at least once per frame)
         if (!thiserrdone) {
-            VSFileSystem::vs_fprintf( stderr, "cloaking queues issue! Report to hellcatv@hotmail.com\nn%d\n%s",
-                                     whichdrawqueue,
-                                     hash_name.c_str() );
+            BOOST_LOG_TRIVIAL(error) << boost::format("cloaking queues issue! Please report at https://github.com/vegastrike/Vega-Strike-Engine-Source\nn%1$d\n%2$s")
+                                     % whichdrawqueue
+                                     % hash_name.c_str();
         }
         thiserrdone = true;
         return;
@@ -1582,7 +1620,7 @@ void Mesh::ProcessFixedDrawQueue( size_t techpass, int whichdrawqueue, bool zsor
 
     // Set up GL state from technique-specified values
     setupGLState(pass, zwrite, blendSrc, blendDst, myMatNum, alphatest, whichdrawqueue);
-    if (pass.cullMode == Technique::Pass::DefaultFace)
+    if (pass.cullMode == Pass::DefaultFace)
         SelectCullFace( whichdrawqueue ); // Default not handled by setupGLState, it depends on mesh data
     if ( !getLighting() ) {
         GFXDisable( LIGHTING );
@@ -1631,8 +1669,9 @@ void Mesh::ProcessFixedDrawQueue( size_t techpass, int whichdrawqueue, bool zsor
         if ( !(nomultienv_passno >= 0 && nomultienv_passno <= 2) ) {
             static int errcount = 0;
             errcount++;
-            if (errcount < 100)
-                fprintf( stderr, "Nomultienvpassno failure %s!\n", hash_name.c_str() );
+            if (errcount < 100) {
+                BOOST_LOG_TRIVIAL(error) << boost::format("Nomultienvpassno failure %1$s!\n") % hash_name.c_str();
+            }
             return;
         }
         if ( (whichpass == GLOW_PASS) && skipglowpass ) {

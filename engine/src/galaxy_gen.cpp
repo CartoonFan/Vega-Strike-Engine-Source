@@ -1,3 +1,27 @@
+/**
+ * galaxy_gen.cpp
+ *
+ * Copyright (C) Daniel Horn
+ * Copyright (C) 2020 pyramid3d, Evert Vorster, Roy Falk, Stephen G. Tuggy,
+ * and other Vega Strike contributors.
+ *
+ * This file is part of Vega Strike.
+ *
+ * Vega Strike is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * Vega Strike is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with Vega Strike.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <vector>
@@ -15,7 +39,7 @@
 #include "galaxy_gen.h"
 #include "vs_random.h"
 #include "options.h"
-
+#include "universe.h"
 
 
 #ifndef _WIN32
@@ -346,8 +370,8 @@ void readColorGrads( vector< string > &entity, const char *file )
     VSFile  f;
     VSError err = f.OpenReadOnly( file, UniverseFile );
     if (err > Ok) {
-        printf( "Failed to load %s", file );
-        GradColor( g );
+        BOOST_LOG_TRIVIAL(error) << boost::format("Failed to load %1%") % file;
+        GradColor g;
         g.minrad   = 0;
         g.r = g.g = g.b = .9;
         g.variance = .1;
@@ -656,14 +680,16 @@ void MakeSmallUnit()
     Vector R, S;
 
     string nam;
+    string base_type;
     string s = string( "" );
+    nam = getRandName( names );
     while (s.length() == 0) {
-        nam = getRandName( starbases );
-        if (nam.length() == 0)
+        base_type = getRandName( starbases );
+        if (base_type.length() == 0)
             return;
         string tmp;
-        if ( ( tmp = starin( nam ) ).length() > 0 ) {
-            nam = (tmp);
+        if ( ( tmp = starin( base_type ) ).length() > 0 ) {
+            base_type = (tmp);
             s   = getRandName( jumps );
         } else {
             break;
@@ -672,10 +698,9 @@ void MakeSmallUnit()
     numstarbases--;
     string nebfile( "" );
     float  radius;
-    string type   = AnalyzeType( nam, nebfile, radius );
+    string type   = AnalyzeType( base_type, nebfile, radius );
     Vector center = generateAndUpdateRS( R, S, radius, true );
-
-    WriteUnit( type, "", nam, R, S, center, nebfile, s, true );
+    WriteUnit( type, nam, base_type, R, S, center, nebfile, s, true );
 }
 
 void MakeJump( float radius, bool forceRS = false, Vector R = Vector( 0, 0, 0 ), Vector S = Vector( 0,
@@ -993,8 +1018,8 @@ void MakeMoons( float callingradius, int callingentitytype )
     while (planetoffset < stars[staroffset].planets.size() && stars[staroffset].planets[planetoffset].moonlevel == moonlevel) {
         PlanetInfo &infos = stars[staroffset].planets[planetoffset++];
         MakePlanet(
-            ( .5+.5*grand() )*callingradius, callingentitytype == STAR ? PLANET : MOON, 
-                   infos.name, infos.unitname, infos.technique, 
+            ( .5+.5*grand() )*callingradius, callingentitytype == STAR ? PLANET : MOON,
+                   infos.name, infos.unitname, infos.technique,
                    infos.num, infos.numjumps,
             infos.numstarbases );
     }
@@ -1058,8 +1083,9 @@ void beginStar()
     MakeJumps( 100+grand()*300, STAR, stars[staroffset].numjumps );
     MakeMoons( game_options.RockyRelativeToPrimary*radius, STAR );
     //Fixme: no jumps should be made around the star.
-    if ( !jumps.empty() )
-        VSFileSystem::vs_fprintf( stderr, "ERROR: jumps not empty() Size==%u!!!!!\n", jumps.size() );
+    if ( !jumps.empty() ) {
+        BOOST_LOG_TRIVIAL(error) << boost::format("ERROR: jumps not empty() Size==%1$u!!!!!") % jumps.size();
+    }
     staroffset++;
 }
 
@@ -1189,7 +1215,7 @@ void readplanetentity( vector< StarInfo > &starinfos, string planetlist, unsigne
 {
     if (numstars < 1) {
         numstars = 1;
-        vs_fprintf( stderr, "No stars exist in this system!\n" );
+        BOOST_LOG_TRIVIAL(warning) << "No stars exist in this system!";
     }
     string::size_type i, j;
     unsigned int u;
@@ -1212,46 +1238,46 @@ void readplanetentity( vector< StarInfo > &starinfos, string planetlist, unsigne
         starinfos[u%numstars].planets.back().moonlevel = nummoon;
         {
             GalaxyXML::Galaxy *galaxy = _Universe->getGalaxy();
-            
+
             static const string numtag("#num#");
             static const string empty;
             static const string::size_type numlen = numtag.length();
             string::size_type numpos;
-            
+
             // Get planet name and texture
             string planetname  = galaxy->getPlanetNameFromInitial( planetlist.substr( j, i == string::npos ? string::npos : i-j ) );
             string texturename = galaxy->getPlanetVariable( planetname, "texture", "No texture supplied in <planets>!" );
-            
+
             // Get unit name, deriving a default name from its texture
             string defunitname = texturename.substr(0, texturename.find_first_of('|'));
             if (defunitname.find_last_of('/') != string::npos)
                 defunitname = defunitname.substr(defunitname.find_last_of('/')+1);
             defunitname = defunitname.substr(0, defunitname.find_last_of('.'));
-            
+
             numpos=0;
             while ((numpos = defunitname.find(numtag, numpos)) != string::npos)
                 defunitname.replace(numpos, numlen, empty);
-            
+
             string unitname    = galaxy->getPlanetVariable( planetname, "unit", defunitname );
-            
+
             // Get planet rendering technique
             string techniquename=galaxy->getPlanetVariable( planetname, "technique", "" );
-            
+
             // Replace randomized number placeholder tags
             starinfos[u%numstars].planets.back().num =
                 rnd( XMLSupport::parse_int( galaxy->getPlanetVariable( planetname, "texture_min", "0" ) ),
                      XMLSupport::parse_int( galaxy->getPlanetVariable( planetname, "texture_max", "0" ) ) );
-            
+
             char num[32];
             if (starinfos[u%numstars].planets.back().num == 0)
                 num[0] = 0;
             else
                 snprintf(num, sizeof(num), "%d", starinfos[u%numstars].planets.back().num);
-            
+
             numpos=0;
             while ((numpos = texturename.find(numtag, numpos)) != string::npos)
                 texturename.replace(numpos, numlen, num);
-            
+
             // Store info
             starinfos[u%numstars].planets.back().name = texturename;
             starinfos[u%numstars].planets.back().unitname = unitname;
@@ -1329,17 +1355,18 @@ void generateStarSystem( SystemInfo &si )
 
     compactness     = si.compactness*game_options.CompactnessScale;
     jumpcompactness = si.compactness*game_options.JumpCompactnessScale;
-    if (si.seed)
+    if (si.seed) {
         seedrand( si.seed );
-    else
+    } else {
         seedrand( stringhash( si.sector+'/'+si.name ) );
-    VSFileSystem::vs_fprintf( stderr, "star %d, natural %d, bases %d", si.numstars, si.numun1, si.numun2 );
+    }
+    BOOST_LOG_TRIVIAL(info) << boost::format("star %1%, natural %2%, bases %3%") % si.numstars % si.numun1 % si.numun2;
     int nat = pushTowardsMean( game_options.MeanNaturalPhenomena, si.numun1 );
     numnaturalphenomena = nat > si.numun1 ? si.numun1 : nat;
     numstarbases    = pushTowardsMean( game_options.MeanStarBases, si.numun2 );
     // numstarbases    = (int) (si.numun2*game_options.SmallUnitsMultiplier); This yields 0  in addition to making the preceding statement pointless.   Probably not intended
     numstarentities = si.numstars;
-    VSFileSystem::vs_fprintf( stderr, "star %d, natural %d, bases %d", numstarentities, numnaturalphenomena, numstarbases );
+    BOOST_LOG_TRIVIAL(info) << boost::format("star %1%, natural %2%, bases %3%") % numstarentities % numnaturalphenomena % numstarbases;
     starradius.push_back( si.sunradius );
     readColorGrads( gradtex, (si.stars).c_str() );
 
@@ -1373,8 +1400,8 @@ void generateStarSystem( SystemInfo &si )
 int main( int argc, char **argv )
 {
     if (argc < 9) {
-        VSFileSystem::vs_fprintf(
-            stderr,
+        // stephengtuggy 2020-11-12: Leaving this, since it is for standalone CONSOLE_APP mode
+        VSFileSystem::vs_fprintf(stderr,
             "Usage: starsysgen <seed> <sector>/<system> <sunradius>/<compactness> <numstars> [N][A]<numnaturalphenomena> <numstarbases> <faction> <namelist> [OtherSystemJumpNodes]...\n" );
         return 1;
     }
@@ -1389,7 +1416,7 @@ int main( int argc, char **argv )
     bool   asteroid   = true;
     float  srad;
     float  comp;
-    sscanf( argv[3], "%f/%f", &srad&comp );
+    sscanf( argv[3], "%f/%f", &srad, &comp );
     vector< string >jumps;
     for (unsigned int i = 12; i < argc; i++)
         jumps.push_back( string( argv[i] ) );

@@ -1,3 +1,29 @@
+/**
+ * beam_generic.cpp
+ *
+ * Copyright (C) Daniel Horn
+ * Copyright (C) 2020 pyramid3d, Stephen G. Tuggy, and other Vega Strike
+ * contributors
+ *
+ * https://github.com/vegastrike/Vega-Strike-Engine-Source
+ *
+ * This file is part of Vega Strike.
+ *
+ * Vega Strike is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * Vega Strike is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with Vega Strike.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+
 #include "vegastrike.h"
 #include <vector>
 #include "beam.h"
@@ -5,7 +31,9 @@
 #include "audiolib.h"
 #include "configxml.h"
 #include "images.h"
-#include "../gfx/camera.h"
+#include "gfx/camera.h"
+#include "universe.h"
+#include "weapon_info.h"
 
 using namespace XMLSupport;
 extern double interpolation_blend_factor;
@@ -61,16 +89,16 @@ void Beam::Init( const Transformation &trans, const weapon_info &cln, void *own,
     local_transformation = trans;     //location on ship
     //cumalative_transformation =trans;
     //trans.to_matrix (cumalative_transformation_matrix);
-    speed = cln.Speed;
-    texturespeed   = cln.PulseSpeed;
-    range          = cln.Range;
-    radialspeed    = cln.RadialSpeed;
-    thickness      = cln.Radius;
-    stability      = cln.Stability;
-    rangepenalty   = cln.Longrange;
-    damagerate     = cln.Damage;
-    phasedamage    = cln.PhaseDamage;
-    texturestretch = cln.TextureStretch;
+    speed = cln.speed;
+    texturespeed   = cln.pulse_speed;
+    range          = cln.range;
+    radialspeed    = cln.radial_speed;
+    thickness      = cln.radius;
+    stability      = cln.stability;
+    rangepenalty   = cln.long_range;
+    damagerate     = cln.damage;
+    phasedamage    = cln.phase_damage;
+    texturestretch = cln.texture_stretch;
     refiretime     = 0;
     refire         = cln.Refire();
     Col.r          = cln.r;
@@ -83,18 +111,18 @@ void Beam::Init( const Transformation &trans, const weapon_info &cln, void *own,
     static int  radslices  = XMLSupport::parse_int( vs_config->getVariable( "graphics", "tractor.scoop_rad_slices", "10" ) )|1;    //Must be odd
     static int  longslices = XMLSupport::parse_int( vs_config->getVariable( "graphics", "tractor.scoop_long_slices", "10" ) );
     lastlength = 0;
-    curlength  = SIMULATION_ATOM*speed;
+    curlength  = simulation_atom_var*speed;
     lastthick  = 0;
-    curthick   = SIMULATION_ATOM*radialspeed;
+    curthick   = simulation_atom_var*radialspeed;
     if (curthick > thickness)      //clamp to max thickness - needed for large simulation atoms
         curthick = thickness;
     static GFXVertexList *_vlist = 0;
     if (!_vlist) {
         int numvertex = float_to_int( mymax( 48, ( (4*radslices)+1 )*longslices*4 ) );
         GFXColorVertex *beam = new GFXColorVertex[numvertex];         //regretably necessary: radslices and longslices come from the config file... so it's at runtime.
-        memset( beam, 0, sizeof (*beam)*numvertex );
+//        memset( beam, 0, sizeof (*beam)*numvertex );
         _vlist = new GFXVertexList( GFXQUAD, numvertex, beam, numvertex, true );         //mutable color contained list
-        delete[] beam;
+       delete[] beam;
     }
     //Shared vlist - we recalculate it every time, so no loss
     vlist = _vlist;
@@ -139,16 +167,16 @@ void Beam::RecalculateVertices( const Matrix &trans )
     const float fadeinlength = 4;
     const bool  tractor = (damagerate < 0 && phasedamage > 0);
     const bool  repulsor     = (damagerate > 0 && phasedamage < 0);
-    float leftex             = -texturespeed*(numframes*SIMULATION_ATOM+interpolation_blend_factor*SIMULATION_ATOM);
+    float leftex             = -texturespeed*(numframes*simulation_atom_var+interpolation_blend_factor*simulation_atom_var);
     float righttex           = leftex+texturestretch*curlength/curthick;           //how long compared to how wide!
     float len                = (impact == ALIVE)
-                               ? (curlength < range ? curlength-speed*SIMULATION_ATOM*(1-interpolation_blend_factor) : range)
+                               ? (curlength < range ? curlength-speed*simulation_atom_var*(1-interpolation_blend_factor) : range)
                                : curlength;
     float fadelen            = (impact == ALIVE) ? len*fadelocation : len*hitfadelocation;
     const bool doscoop       = ( scoop && (tractor || repulsor) );
     float fadetex            = leftex+(righttex-leftex)*fadelocation;
     const float touchtex     = leftex-fadeinlength*.5*texturestretch;
-    float thick              = curthick != thickness ? curthick-radialspeed*SIMULATION_ATOM
+    float thick              = curthick != thickness ? curthick-radialspeed*simulation_atom_var
                                *(1-interpolation_blend_factor) : thickness;
     float ethick             = ( thick/( (thickness > 0) ? thickness : 1.0f ) )*(doscoop ? curlength*scooptanangle : 0);
     const float invfadelen   = thick*fadeinlength;
@@ -281,18 +309,18 @@ void Beam::UpdatePhysics( const Transformation &trans,
                           Unit *firer,
                           Unit *superunit )
 {
-    curlength += SIMULATION_ATOM*speed;
+    curlength += simulation_atom_var*speed;
     if (curlength < 0)
         curlength = 0;
     if (curlength > range)
         curlength = range;
     if (curthick == 0) {
-        if (AUDIsPlaying( sound ) && refiretime >= SIMULATION_ATOM)
+        if (AUDIsPlaying( sound ) && refiretime >= simulation_atom_var)
             AUDStopPlaying( sound );
-        refiretime += SIMULATION_ATOM*HeatSink;
+        refiretime += simulation_atom_var*HeatSink;
         return;
     }
-    if (stability && numframes*SIMULATION_ATOM > stability)
+    if (stability && numframes*simulation_atom_var > stability)
         impact |= UNSTABLE;
     numframes++;
     Matrix cumulative_transformation_matrix;
@@ -310,7 +338,7 @@ void Beam::UpdatePhysics( const Transformation &trans,
 #ifndef PERFRAMESOUND
     AUDAdjustSound( sound, cumulative_transformation.position, speed*cumulative_transformation_matrix.getR() );
 #endif
-    curthick += (impact&UNSTABLE) ? -radialspeed*SIMULATION_ATOM : radialspeed*SIMULATION_ATOM;
+    curthick += (impact&UNSTABLE) ? -radialspeed*simulation_atom_var : radialspeed*simulation_atom_var;
     if (curthick > thickness)
         curthick = thickness;
     if (curthick <= 0) {
@@ -358,24 +386,24 @@ extern Cargo * GetMasterPartList( const char* );
 
 bool Beam::Collide( Unit *target, Unit *firer, Unit *superunit )
 {
-    if (this == NULL || target == NULL) {
-        VSFileSystem::vs_fprintf( stderr, "Recovering from nonfatal beam error when beam inactive\n" );
+    if (target == NULL) {
+        BOOST_LOG_TRIVIAL(error) << "Recovering from nonfatal beam error when beam inactive\n";
         return false;
     }
     float distance;
-    Vector normal;     //apply shields                            
+    Vector normal;     //apply shields
 
     QVector direction( this->direction.Cast() );
     QVector end( center+direction.Scale( curlength ) );
-    enum clsptr type = target->isUnit();
-    if (target == owner || type == NEBULAPTR || type == ASTEROIDPTR) {
+    enum _UnitType type = target->isUnit();
+    if (target == owner || type == _UnitType::nebula || type == _UnitType::asteroid) {
         static bool collideroids =
             XMLSupport::parse_bool( vs_config->getVariable( "physics", "AsteroidWeaponCollision", "false" ) );
-        if ( type != ASTEROIDPTR || (!collideroids) )
+        if ( type != _UnitType::asteroid || (!collideroids) )
             return false;
     }
     static bool collidejump = XMLSupport::parse_bool( vs_config->getVariable( "physics", "JumpWeaponCollision", "false" ) );
-    if ( type == PLANETPTR && (!collidejump) && !target->GetDestinations().empty() )
+    if ( type == _UnitType::planet && (!collidejump) && !target->GetDestinations().empty() )
         return false;
     //A bunch of needed config variables - its best to have them here, so that they're loaded the
     //very first time Collide() is called. That way, we avoid hiccups.
@@ -438,8 +466,8 @@ bool Beam::Collide( Unit *target, Unit *firer, Unit *superunit )
         impact |= IMPACT;
         GFXColor coltmp( Col );
         float tmp = (curlength/range);
-        float appldam     = (damagerate*SIMULATION_ATOM*curthick/thickness)*( (1-tmp)+tmp*rangepenalty );
-        float phasdam     = (phasedamage*SIMULATION_ATOM*curthick/thickness)*( (1-tmp)+tmp*rangepenalty );
+        float appldam     = (damagerate*simulation_atom_var*curthick/thickness)*( (1-tmp)+tmp*rangepenalty );
+        float phasdam     = (phasedamage*simulation_atom_var*curthick/thickness)*( (1-tmp)+tmp*rangepenalty );
         float owner_rsize = superunit->rSize();
         int owner_faction = superunit->faction;
         if (tractor || repulsor) {
@@ -469,8 +497,8 @@ bool Beam::Collide( Unit *target, Unit *firer, Unit *superunit )
                     //Modulate force on little mass objects, so they don't slingshot right past you
                     target->ApplyForce( direction
                                        *( appldam
-                                         /sqrt( (target->sim_atom_multiplier
-                                                 > 0) ? target->sim_atom_multiplier : 1.0 )*mymin( 1, target->GetMass() ) ) );
+                                         /sqrt( /*(target->sim_atom_multiplier
+                                                 > 0) ? target->sim_atom_multiplier : */ 1.0 )*mymin( 1, target->getMass() ) ) );
                 }
             }
             float ors_m = o_ors_m, trs_m = o_trs_m, ofs = o_o;

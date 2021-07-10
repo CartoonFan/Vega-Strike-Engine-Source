@@ -1,3 +1,29 @@
+/**
+ * gamemenu.cpp
+ *
+ * Copyright (C) Daniel Horn
+ * Copyright (C) 2020 pyramid3d, Stephen G. Tuggy, and other Vega Strike
+ * contributors
+ *
+ * https://github.com/vegastrike/Vega-Strike-Engine-Source
+ *
+ * This file is part of Vega Strike.
+ *
+ * Vega Strike is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * Vega Strike is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with Vega Strike.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+
 #include "vegastrike.h"
 #include "in_kb.h"
 #include "in_kb_data.h"
@@ -447,6 +473,7 @@ bool GameMenu::processMainMenuButton( const EventCommandId &command, Control *co
 
 bool GameMenu::processExitGameButton( const EventCommandId &command, Control *control )
 {
+    VSFileSystem::flushLogs();
     winsys_exit( 0 );
     return true;
 }
@@ -584,7 +611,7 @@ bool NetActionConfirm::confirmedJoinGame()
 //static
 bool NetActionConfirm::finalizeJoinGame( int launchShip )
 {
-    return true;   
+    return true;
 }
 
 bool GameMenu::processJoinGameButton( const EventCommandId &command, Control *control )

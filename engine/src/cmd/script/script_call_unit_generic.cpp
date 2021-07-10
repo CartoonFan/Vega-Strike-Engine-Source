@@ -34,13 +34,13 @@
 #include <unistd.h>
 #endif
 #include "cmd/unit_generic.h"
-#include "cmd/unit_factory.h"
+#include "unit.h"
 #include <expat.h>
 #include "xml_support.h"
 
 #include "vegastrike.h"
 #include "cmd/collection.h"
-#include "cmd/planet_generic.h"
+#include "cmd/planet.h"
 #include "cmd/ai/order.h"
 #include "cmd/ai/aggressive.h"
 #include "cmd/ai/missionscript.h"
@@ -53,14 +53,18 @@
 #include "gfx/cockpit_generic.h"
 #include "cmd/images.h"
 #include "savegame.h"
-#include "cmd/nebula_generic.h"
+#include "cmd/nebula.h"
 #include "hashtable.h"
 #include "flightgroup.h"
-#include "cmd/unit_factory.h"
-#include "cmd/asteroid_generic.h"
+#include "nebula.h"
 #include "gfxlib.h"
 #include "cmd/pilot.h"
 #include "cmd/unit_util.h"
+#include "planet.h"
+#include "asteroid.h"
+#include "star_system.h"
+#include "universe.h"
+
 
 extern const vector< string >& ParseDestinations( const string &value );
 extern Unit& GetUnitMasterPartList();
@@ -83,8 +87,8 @@ static Unit * getIthUnit( un_iter uiter, int i );
 varInst* Mission::call_unit( missionNode *node, int mode )
 {
 #ifdef ORDERDEBUG
-    VSFileSystem::vs_fprintf( stderr, "callun%x", this );
-    fflush( stderr );
+    BOOST_LOG_TRIVIAL(trace) << boost::format("callun%1$x") % this;
+    VSFileSystem::flushLogs();
 #endif
     varInst *viret = NULL;
     trace( node, mode );
@@ -176,11 +180,11 @@ varInst* Mission::call_unit( missionNode *node, int mode )
         }
         Unit *my_unit = NULL;
         if (mode == SCRIPT_RUN) {
-            clsptr clstyp = UNITPTR;
+            _UnitType clstyp = _UnitType::unit;
             if (method_id == CMT_UNIT_launchJumppoint || method_id == CMT_UNIT_launchPlanet)
-                clstyp = PLANETPTR;
+                clstyp = _UnitType::planet;
             else if (method_id == CMT_UNIT_launchNebula)
-                clstyp = NEBULAPTR;
+                clstyp = _UnitType::nebula;
             string name_string    = *( (string*) name_vi->object );
             string faction_string = *( (string*) faction_vi->object );
             string type_string    = *( (string*) type_vi->object );
@@ -203,16 +207,16 @@ varInst* Mission::call_unit( missionNode *node, int mode )
             for (int i = 0; i < 3; i++)
                 cf.rot[i] = 0.0;
 #ifdef ORDERDEBUG
-            VSFileSystem::vs_fprintf( stderr, "cunl%x", this );
-            fflush( stderr );
+            BOOST_LOG_TRIVIAL(trace) << boost::format("cunl%1$x") % this;
+            VSFileSystem::flushLogs();
 #endif
             Unit *tmp = call_unit_launch( &cf, clstyp, destinations );
             number_of_ships += nr_of_ships;
             if (!my_unit)
                 my_unit = tmp;
 #ifdef ORDERDEBUG
-            VSFileSystem::vs_fprintf( stderr, "ecun" );
-            fflush( stderr );
+            BOOST_LOG_TRIVIAL(trace) << "ecun";
+            VSFileSystem::flushLogs();
 #endif
         }
         deleteVarInst( name_vi );
@@ -484,7 +488,7 @@ varInst* Mission::call_unit( missionNode *node, int mode )
         } else if (method_id == CMT_UNIT_getEnergyData) {
             float res = 0.0;
             if (mode == SCRIPT_RUN)
-                res = my_unit->EnergyData();
+                res = my_unit->energyData();
             viret = newVarInst( VI_TEMP );
             viret->type = VAR_FLOAT;
             viret->float_val = res;
@@ -911,19 +915,19 @@ varInst* Mission::call_unit( missionNode *node, int mode )
             assert( 0 );
         }
 #ifdef ORDERDEBUG
-        VSFileSystem::vs_fprintf( stderr, "callundel%x", ovi );
-        fflush( stderr );
+        BOOST_LOG_TRIVIAL(trace) << boost::format("callundel%1$x") % ovi;
+        VSFileSystem::flushLogs();
 #endif
         deleteVarInst( ovi );
 #ifdef ORDERDEBUG
-        VSFileSystem::vs_fprintf( stderr, "undel1" );
-        fflush( stderr );
+        BOOST_LOG_TRIVIAL(trace) << "undel1";
+        VSFileSystem::flushLogs();
 #endif
         return viret;
     }     //else (objects)
 #ifdef ORDERDEBUG
-    VSFileSystem::vs_fprintf( stderr, "endcallun%x", this );
-    fflush( stderr );
+    BOOST_LOG_TRIVIAL(trace) << boost::format("endcallun%1$x") % this;
+    VSFileSystem::flushLogs();
 #endif
     return NULL;     //never reach
 }
@@ -937,8 +941,8 @@ Unit* Mission::call_unit_launch( CreateFlightgroup *fg, int type, const string &
     int    u;
     Unit  *par   = _Universe->AccessCockpit()->GetParent();
     CollideMap::iterator  metahint[2] = {
-        _Universe->scriptStarSystem()->collidemap[Unit::UNIT_ONLY]->begin(),
-        _Universe->scriptStarSystem()->collidemap[Unit::UNIT_BOLT]->begin()
+        _Universe->scriptStarSystem()->collide_map[Unit::UNIT_ONLY]->begin(),
+        _Universe->scriptStarSystem()->collide_map[Unit::UNIT_BOLT]->begin()
     };
     CollideMap::iterator *hint = metahint;
     if ( par && !is_null( par->location[Unit::UNIT_ONLY] ) && !is_null( par->location[Unit::UNIT_BOLT] )
@@ -946,7 +950,7 @@ Unit* Mission::call_unit_launch( CreateFlightgroup *fg, int type, const string &
         hint = par->location;
     for (u = 0; u < fg->nr_ships; u++) {
         Unit *my_unit;
-        if (type == PLANETPTR) {
+        if (type == _UnitType::planet) {
             float radius     = 1;
             char *tex        = strdup( fg->fg->type.c_str() );
             char *nam        = strdup( fg->fg->type.c_str() );
@@ -965,7 +969,7 @@ Unit* Mission::call_unit_launch( CreateFlightgroup *fg, int type, const string &
                 d = parse_alpha( bdst );
             if (bsrc[0] != '\0')
                 s = parse_alpha( bsrc );
-            my_unit = UnitFactory::createPlanet( QVector( 0, 0, 0 ), QVector( 0, 0, 0 ), 0, Vector( 0, 0, 0 ), 
+            my_unit = new Planet( QVector( 0, 0, 0 ), QVector( 0, 0, 0 ), 0, Vector( 0, 0, 0 ),
                                                  0, 0, radius, tex, "", "", s,
                                                  d, ParseDestinations( destinations ),
                                                  QVector( 0, 0, 0 ), NULL, mat,
@@ -975,14 +979,14 @@ Unit* Mission::call_unit_launch( CreateFlightgroup *fg, int type, const string &
             free( tex );
             free( nam );
             free( citylights );
-        } else if (type == NEBULAPTR) {
-            my_unit = UnitFactory::createNebula(
+        } else if (type == _UnitType::nebula) {
+            my_unit = new Nebula(
                 fg->fg->type.c_str(), false, faction_nr, fg->fg, u+fg->fg->nr_ships-fg->nr_ships );
-        } else if (type == ASTEROIDPTR) {
-            my_unit = UnitFactory::createAsteroid(
+        } else if (type == _UnitType::asteroid) {
+            my_unit = new Asteroid(
                 fg->fg->type.c_str(), faction_nr, fg->fg, u+fg->fg->nr_ships-fg->nr_ships, .01 );
         } else {
-            my_unit = UnitFactory::createUnit( fg->fg->type.c_str(), false, faction_nr, string(
+            my_unit = new GameUnit( fg->fg->type.c_str(), false, faction_nr, string(
                                                   "" ), fg->fg, u+fg->fg->nr_ships-fg->nr_ships, NULL );
         }
         units[u] = my_unit;
@@ -996,7 +1000,7 @@ Unit* Mission::call_unit_launch( CreateFlightgroup *fg, int type, const string &
         pox.j = fg->fg->pos.j+u*fg_radius*3;
         pox.k = fg->fg->pos.k+u*fg_radius*3;
         my_unit->SetPosAndCumPos( pox );
-        if (type == ASTEROIDPTR || type == NEBULAPTR) {
+        if (type == _UnitType::asteroid || type == _UnitType::nebula) {
             my_unit->PrimeOrders();
         } else {
             my_unit->LoadAIScript( fg->fg->ainame );

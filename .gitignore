@@ -7,3 +7,6 @@ build-engine-Desktop-Default/
 packages/
 *.log
 *.bak
+*.kdev4
+.vs/
+.vscode/

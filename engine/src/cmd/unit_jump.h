@@ -1,3 +1,29 @@
+/**
+ * unit_jump.h
+ *
+ * Copyright (C) Daniel Horn
+ * Copyright (C) 2020 pyramid3d, Stephen G. Tuggy, and other Vega Strike
+ * contributors
+ *
+ * https://github.com/vegastrike/Vega-Strike-Engine-Source
+ *
+ * This file is part of Vega Strike.
+ *
+ * Vega Strike is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * Vega Strike is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with Vega Strike.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+
 #ifndef __UNIT_JUMP_CPP__
 #define __UNIT_JUMP_CPP__
 
@@ -30,8 +56,8 @@ extern void DealPossibleJumpDamage( Unit *un );
 extern void ActivateAnimation( Unit* );
 void WarpPursuit( Unit *un, StarSystem *sourcess, std::string destination );
 
-template < class UnitType >
-bool GameUnit< UnitType >::TransferUnitToSystem( unsigned int kk, StarSystem* &savedStarSystem, bool dosightandsound )
+
+bool GameUnit::TransferUnitToSystem( unsigned int kk, StarSystem* &savedStarSystem, bool dosightandsound )
 {
     bool ret = false;
     if (pendingjump[kk]->orig == this->activeStarSystem || this->activeStarSystem == NULL) {
@@ -63,7 +89,7 @@ bool GameUnit< UnitType >::TransferUnitToSystem( unsigned int kk, StarSystem* &s
                 }
             }
             if ( this == _Universe->AccessCockpit()->GetParent() ) {
-                VSFileSystem::vs_fprintf( stderr, "Unit is the active player character...changing scene graph\n" );
+                BOOST_LOG_TRIVIAL(info) << "Unit is the active player character...changing scene graph\n";
                 savedStarSystem->SwapOut();
                 AUDStopAllSounds();
                 savedStarSystem = pendingjump[kk]->dest;
@@ -90,7 +116,7 @@ bool GameUnit< UnitType >::TransferUnitToSystem( unsigned int kk, StarSystem* &s
 
                 this->SetCurPosition( pos );
                 ActivateAnimation( jumpnode );
-                if (jumpnode->isUnit() == UNITPTR) {
+                if (jumpnode->isUnit() == _UnitType::unit) {
                     QVector Offset( pos.i < 0 ? 1 : -1,
                                     pos.j < 0 ? 1 : -1,
                                     pos.k < 0 ? 1 : -1 );
@@ -106,7 +132,7 @@ bool GameUnit< UnitType >::TransferUnitToSystem( unsigned int kk, StarSystem* &s
             for (unsigned int jjj = 0; jjj < 2; ++jjj)
                 for (un_iter i = _Universe->activeStarSystem()->getUnitList().createIterator();
                      (tester = *i) != NULL; ++i)
-                    if (tester->isUnit() == UNITPTR && tester != this)
+                    if (tester->isUnit() == _UnitType::unit && tester != this)
                         if ( ( this->LocalPosition()-tester->LocalPosition() ).Magnitude() < this->rSize()+tester->rSize() )
                             this->SetCurPosition( this->LocalPosition()+this->cumulative_transformation_matrix.getR()
                                            *( 4*( this->rSize()+tester->rSize() ) ) );
@@ -116,19 +142,19 @@ bool GameUnit< UnitType >::TransferUnitToSystem( unsigned int kk, StarSystem* &s
                 AUDPlay( jumparrive, this->LocalPosition(), this->GetVelocity(), 1 );
         } else {
 #ifdef JUMP_DEBUG
-            VSFileSystem::vs_fprintf( stderr, "Unit FAILED remove from star system\n" );
+            BOOST_LOG_TRIVIAL(debug) << "Unit FAILED remove from star system\n";
 #endif
         }
-        if (this->docked&UnitType::DOCKING_UNITS)
+        if (this->docked&DOCKING_UNITS)
             for (unsigned int i = 0; i < this->pImage->dockedunits.size(); i++) {
                 Unit *unut;
                 if ( NULL != ( unut = this->pImage->dockedunits[i]->uc.GetUnit() ) )
                     unut->TransferUnitToSystem( kk, savedStarSystem, dosightandsound );
             }
-        if ( this->docked&(UnitType::DOCKED|UnitType::DOCKED_INSIDE) ) {
+        if ( this->docked&(DOCKED|DOCKED_INSIDE) ) {
             Unit *un = this->pImage->DockedTo.GetUnit();
             if (!un) {
-                this->docked &= ( ~(UnitType::DOCKED|UnitType::DOCKED_INSIDE) );
+                this->docked &= ( ~(DOCKED|DOCKED_INSIDE) );
             } else {
                 Unit *targ = NULL;
                 for (un_iter i = pendingjump[kk]->dest->getUnitList().createIterator();
@@ -141,7 +167,7 @@ bool GameUnit< UnitType >::TransferUnitToSystem( unsigned int kk, StarSystem* &s
             }
         }
     } else {
-        VSFileSystem::vs_fprintf( stderr, "Already jumped\n" );
+        BOOST_LOG_TRIVIAL(warning) << "Already jumped\n";
     }
     return ret;
 }
