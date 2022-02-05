@@ -38,16 +38,16 @@ def elimiQuote(s, delim='"""'):
 	even = 1
 	if (where==-1 and delim!='"'):
 		s=elimiQuote(s,'"')
-	while(where!=-1):
+	while (where!=-1):
 		tmp=s[0:where]
 		if (even==1 and delim!='"'):
 			print(tmp)
 			tmp=elimiQuote(tmp,'"')
-		ret=ret+tmp
+		ret += tmp
 		even = 1-even
 		s=s[where+len(delim):]
 		where=findQuot(s,delim)
-	ret=ret+s
+	ret += s
 	return ret
 def earlyStrCmp(haystack,needle):
 	ln = len(needle)
@@ -84,16 +84,13 @@ def semiColonSeparatedList(s, delim=','):
 		trip=0
 		quot=quot1
 	else:
-		quot=quot3		
-	sem = s.find(delim);	
+		quot=quot3
+	sem = s.find(delim);
 	l=[]
 	while sem!=-1:
 		equot=0
 		while (quot<sem and quot!=-1):
-			if (trip):
-				equot=findQuot(s,'"""',quot+1)
-			else:
-				equot=findQuot(s,'"',quot+1)	
+			equot = findQuot(s,'"""',quot+1) if (trip) else findQuot(s,'"',quot+1)
 			quot3=findQuot(s,'"""',equot+1)
 			quot1 = findQuot(s,'"',equot+1)
 			trip=1
@@ -113,7 +110,7 @@ def semiColonSeparatedList(s, delim=','):
 		quot1 = findQuot(s,'"')
 		quot=quot3;
 		trip=1
-		if (quot3==-1 or (quot1!=-1 and quot1<quot3)):
+		if quot == -1 or quot1 != -1 and quot1 < quot:
 			quot=quot1			
 			trip=0
 

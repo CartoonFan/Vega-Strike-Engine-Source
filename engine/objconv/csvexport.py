@@ -146,13 +146,13 @@ def makeName(nam,guide):
 		return nam+'('+guide+')'
 	return nam
 
-def ProcessStruct (guide,struc):
-	if (len(struc)==0):
-		for i in range(guide.count(";")):
-			struc+=";"
-	l=struc.split(';')
-	g=guide.split(';')	
-	return interleave(g,l," ",'=');
+def ProcessStruct(guide,struc):
+    if (len(struc)==0):
+        for _ in range(guide.count(";")):
+            struc+=";"
+    l=struc.split(';')
+    g=guide.split(';')
+    return interleave(g,l," ",'=');
 
 def ProcessList(guide,row):
 	og=guide.find('{');

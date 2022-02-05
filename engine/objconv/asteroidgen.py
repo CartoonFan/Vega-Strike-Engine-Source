@@ -96,16 +96,14 @@ if centroid:
 			place[2]+=vertices[nume][2]/len(face)
 		writeRoid(place[0]*scale,scale*place[1],scale*place[2],"asteroidsPriv")
 def vecLen(x):
-	sum=0
-	for i in x:
-		sum+=i*i
+	sum = sum(i*i for i in x)
 	return math.sqrt(sum)
 i=0
 sys.stdout.write(",,,,,,,,,0,0,16,0,1")
 import math
 print("")
 sys.stdout.write('"asteroidsPriv","objects/asteroids","Asteroids","FIXME","FIXME","INERT","AFieldBasePriv","af-hud.spr",1,,,,," ",,,,,,20000,20000,,,999999999,500,500,500,500,500,500,500,500,0,0,0,0,,,,,0,,,,,FALSE,,,,,0,,500,500,500,10,10,10,20000,20000,20000,20000,20000,20000,20000,,,FALSE,FALSE,4999,5,180,10,,,,,,,,0,0,0,"1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1","1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1",1,1,1,1,1,1,1,1,0,0,,,,')
-for i in range(num):
+for _ in range(num):
 	vec=(rad,rad,rad)
 	while vecLen(vec)>rad:
 		vec=(random.uniform(-rad,rad),random.uniform(-rad,rad),random.uniform(-rad,rad))		

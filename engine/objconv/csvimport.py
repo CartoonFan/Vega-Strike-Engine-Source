@@ -71,24 +71,24 @@ def CsvImport(units, unitList):
         key = csv.semiColonSeparatedList(Lines[0],',')	# string into list for the first line Keys
 
         for unit in unitList:
-            try:				# Catch file IOError, if the <unitname>.csv doesn't exist
-                Unit = unit+".csv"
-                UnitFile=file(Unit, "r")	# open csv <unitname> for read
-            except IOError:
-                fileError(Unit)
-                break
+                try:				# Catch file IOError, if the <unitname>.csv doesn't exist
+                    Unit = unit+".csv"
+                    UnitFile=file(Unit, "r")	# open csv <unitname> for read
+                except IOError:
+                    fileError(Unit)
+                    break
 
-            for numline in range(0,len(Lines)):	# have to index the line to change Lines[numline], not line in Lines that exists only in this block
-                line = Lines[numline]
-                if (csv.earlyStrCmp(line,unit)):		# look for unit key in the line and if found
-                    line = csv.writeList(reorderList(key,ProcessUnit(UnitFile)))
-                    UnitFile.close()
-                    Lines[numline] = line
-                    # We also need to check that the unit record being modified didn't change the key. If it did,
-                    # We will need to rename the <unitname>.csv to reflect this, so it remains usable by csvimport later.
-                    if not csv.earlyStrCmp(line, unit):			# key for record was changed
-                        NewName = line[:line.find(",")]+".csv"		# save the new name.
-                        os.rename(Unit, NewName)
+                for numline in range(len(Lines)):	# have to index the line to change Lines[numline], not line in Lines that exists only in this block
+                        line = Lines[numline]
+                        if (csv.earlyStrCmp(line,unit)):		# look for unit key in the line and if found
+                            line = csv.writeList(reorderList(key,ProcessUnit(UnitFile)))
+                            UnitFile.close()
+                            Lines[numline] = line
+                            # We also need to check that the unit record being modified didn't change the key. If it did,
+                            # We will need to rename the <unitname>.csv to reflect this, so it remains usable by csvimport later.
+                            if not csv.earlyStrCmp(line, unit):			# key for record was changed
+                                NewName = line[:line.find(",")]+".csv"		# save the new name.
+                                os.rename(Unit, NewName)
         OutFile = file(units, "w")		# All changes have been made, time to write out the file
         for line in Lines:
             OutFile.write(line)
@@ -166,8 +166,8 @@ def CollapseList(lis):
         for i in r[len(r)-1]:
             if i!="":
                 found=1
-        if (0==found):
-            r=r[0:len(r)-1]
+        if found == 0:
+                r=r[0:len(r)-1]
         for i in r:
             s+='{'
             for j in range(len(i)):

@@ -352,14 +352,14 @@ def getBody(plist):
 
 def getPlanet(fac,radpair=None,name=''):
 	global combined_planet_prob
-	if not fac in planetprob:
+	if fac not in planetprob:
 		fac=None
-	if not (fac,radpair) in combined_planet_prob:
+	if (fac, radpair) not in combined_planet_prob:
 		if (radpair in starplanetmult):
 			combined_planet_prob=CombineTables(planetprob,starplanetmult[radpair],fac,radpair,combined_planet_prob)
 		else:
-			radpair=None		
-	if (radpair==None):
+			radpair=None
+	if radpair is None:
 		plist=planetprob[fac]
 	else:
 		plist = combined_planet_prob[(fac,radpair)]
@@ -420,14 +420,12 @@ def abbreviate(l,planets):
 				print(longname+"Not found")
 				throw
 	except:
-		ret=[]
-		for i in l:
-			ret.append(abbrevlookup[i])
+		ret = [abbrevlookup[i] for i in l]
 	return ret
 		
 def getPlanets(fac,planets, sun_radius,name):
 	import starCodes
-	if (fac==None):
+	if fac is None:
 		fac='unknown'
 
 	pair=starCodes.sizeToNum(sun_radius)
@@ -438,7 +436,7 @@ def getPlanets(fac,planets, sun_radius,name):
 	moons=[]
 	moonindex=[]
 	j=0
-	for i in range(numplan):
+	for _ in range(numplan):
 		plan=getPlanet(fac,pair,name)
 		plist.append(plan)
 		mi=[]

@@ -34,18 +34,18 @@ masterpartfile=file("master_part_list.csv","w")
 
 def printncommas(n):
     retstring=""
-    for k in range(n):
+    for _ in range(n):
         retstring+=','
     return retstring
 def printn1(n,delim=","):
     retstring=""
-    for k in range(n):
+    for _ in range(n):
         retstring+='1'
         retstring+=delim
     return retstring
 def printn0(n,delim=','):
     retstring=""
-    for k in range(n):
+    for _ in range(n):
         retstring+='0'
         retstring+=delim
     return retstring

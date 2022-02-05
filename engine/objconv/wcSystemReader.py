@@ -78,10 +78,9 @@ if len(sys.argv)>1:
 	olist=[]
 #	lis.sort()
 	for l in lis:
-		if (len(olist)!=0):
-			if (l==olist[len(olist)-1]):
-				continue
-		olist=olist+[l];	
+		if (len(olist) != 0) and (l == olist[len(olist) - 1]):
+			continue
+		olist += [l];
 	f.close()
 #	f = open (arg,"w")
 #	f.writelines(olist);
@@ -90,26 +89,26 @@ if len(sys.argv)>1:
 	link=linkfil.readlines();
 	for l in link:
 		m=csv.semiColonSeparatedList(l,";")
-		if not m[0] in jumps:
+		if m[0] not in jumps:
 			jumps[m[0]]=[]
-		if not m[2] in jumps:
+		if m[2] not in jumps:
 			jumps[m[2]]=[]
-		if (not m[2] in jumps[m[0]]):
+		if m[2] not in jumps[m[0]]:
 			jumps[m[0]].append(m[2])
-		if (not m[0] in jumps[m[2]]):
+		if m[0] not in jumps[m[2]]:
 			jumps[m[2]].append(m[0])
 #now to read this sucker
 	for i in range(len(olist)):
 		olist[i]=csv.semiColonSeparatedList(olist[i],';')
 	tab = csv.makeTable(olist );
 	secs={}
+	import starCodes
 	for i in tab:
 		sys=tab[i]
 		h={}
 #		print i + str(sys)
 		sec=Prettify(sys["SectorName"])
 		name = Prettify(sys["SystemName"])
-		import starCodes
 		h["sun_radius"]=str(starCodes.codeToSize(sys["StarColorType"]))
 		h["xyz"]=sys["XCoordinates"]+" "+sys["YCoordinates"]+" "+sys["ZCoordinates"];
 		h["quadrant"]=Prettify(sys["QuadrantName"])
@@ -117,7 +116,7 @@ if len(sys.argv)>1:
 		jamp=""
 		if (i in jumps):
 			for k in jumps[i]:
-				if not k in tab:
+				if k not in tab:
 					print(k+" missing from system list")
 					continue
 				if (jamp!=""):
@@ -126,7 +125,7 @@ if len(sys.argv)>1:
 			h["jumps"]=jamp
 		else:
 			print("no jumps for "+i+" "+name)
-		if not sec in secs:
+		if sec not in secs:
 			secs[sec]={}
 		secs[sec][name]=h
 	ret=writeXML(secs)

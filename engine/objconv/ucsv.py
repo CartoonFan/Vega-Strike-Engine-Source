@@ -100,18 +100,18 @@ def prefixCmp(pre,whole):
 
 def printncommas(n):
     retstring=""
-    for k in range(n):
+    for _ in range(n):
         retstring+=','
     return retstring
 def printn1(n,delim=","):
     retstring=""
-    for k in range(n):
+    for _ in range(n):
         retstring+='1'
         retstring+=delim
     return retstring
 def printn0(n,delim=','):
     retstring=""
-    for k in range(n):
+    for _ in range(n):
         retstring+='0'
         retstring+=delim
     return retstring
@@ -298,10 +298,7 @@ def printshield(shield):
     left=getAttributeValueCIS(shield,'left')
     right=getAttributeValueCIS(shield,'right')
     tmp=getAttributeValueCIS(shield,'leak')
-    if (len(tmp)):
-        leak=str(float(tmp)/100.0)
-    else:
-        leak="0.0"
+    leak = str(float(tmp)/100.0) if len(tmp) else "0.0"
     recharge=getAttributeValueCIS(shield,'recharge')
     retstring=""
 #shieldFTR, front
@@ -343,10 +340,7 @@ def printreactorrecharge(reactor):
 
 def printjumpdrivepresent(jump):
     invpres=getAttributeValueCIS(jump,"missing")
-    if (invpres!=""):
-        invpres=1-int(invpres)
-    else:
-        invpres=1
+    invpres = 1-int(invpres) if (invpres!="") else 1
     if (invpres):
         return "TRUE"
     else:
@@ -471,10 +465,7 @@ def printcloak(cloak):
     retstring=""
 #can cloak
     missing=getAttributeValueCIS(cloak,"missing")
-    if(missing!=""):
-        missing=str(1-float(missing))
-    else:
-        missing="1"
+    missing = str(1-float(missing)) if (missing!="") else "1"
     retstring+=missing
     retstring+=','
 #cloak min
