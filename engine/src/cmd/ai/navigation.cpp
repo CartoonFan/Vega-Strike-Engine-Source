@@ -641,7 +641,7 @@ void AutoLongHaul::Execute() {
     StraightToTarget = true;    // free to fly
 
     //face target unless warp ramping is done
-    Unit *obstacle = NULL;
+    Unit *obstacle = nullptr;
     // The thing compressing our ftl bubble is the nearest object in space.
     parent->GetNearestObjectSignificantDistance(&obstacle);
     bool currently_inside_landing_zone = false;
